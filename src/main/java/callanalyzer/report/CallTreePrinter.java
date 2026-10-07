@@ -20,10 +20,10 @@ import java.util.Set;
  *
  * <pre>
  * App#main(String[])
- *   → Dealer#sell(ICar)  (App.java:9)
- *     ★ ICar#start()  (Dealer.java:7)
- *       ⇒ Bmw: AbstractCar#start()
- *         → Engine#ignite()  (AbstractCar.java:12)
+ *   -> Dealer#sell(ICar)  (App.java:9)
+ *     * ICar#start()  (Dealer.java:7)
+ *       => Bmw: AbstractCar#start()
+ *         -> Engine#ignite()  (AbstractCar.java:12)
  * </pre>
  */
 public final class CallTreePrinter {
@@ -41,7 +41,7 @@ public final class CallTreePrinter {
 
     public static void write(AnalysisResult result, PrintWriter out) {
         out.println();
-        out.println("=== Çağrı ağacı (★ = hedef tipe yapılan çağrı, ↻ = yukarıda açıldı) ===");
+        out.println("=== Cagri agaci (* = hedef tipe yapilan cagri, => = olasi uygulama, ^ = yukarida acildi) ===");
         CallTreePrinter printer = new CallTreePrinter(result, out);
         for (MethodRef entry : result.entries()) {
             out.println(entry.toShortString());
@@ -69,7 +69,7 @@ public final class CallTreePrinter {
             if (!hit && expandable.isEmpty() && !hasUnexpandedAnalysable(edge)) {
                 continue;
             }
-            String marker = hit ? "★ " : "→ ";
+            String marker = hit ? "* " : "-> ";
             String receivers = "";
             if (hit && edge.site().kind().isDynamicDispatch()) {
                 receivers = "  {" + String.join(", ", edge.targets().stream()
@@ -96,24 +96,24 @@ public final class CallTreePrinter {
             String label = target.owner().equals(receiver)
                     ? target.toShortString()
                     : MethodRef.simpleName(receiver) + ": " + target.toShortString();
-            out.println(pad(indent) + "⇒ " + label + suffix(target, analysed));
+            out.println(pad(indent) + "=> " + label + suffix(target, analysed));
             if (analysed) {
                 printChildren(target, indent + 1);
             }
         } else if (printed.contains(target) && analysed) {
-            out.println(pad(indent) + "↻ " + target.toShortString());
+            out.println(pad(indent) + "^ " + target.toShortString());
         } else if (analysed) {
             printChildren(target, indent);
         } else if (result.hierarchy().method(target).isPresent()) {
-            out.println(pad(indent) + "… (açılmadı: derinlik sınırı ya da filtre)");
+            out.println(pad(indent) + "... (acilmadi: derinlik siniri ya da filtre)");
         }
     }
 
     private String suffix(MethodRef target, boolean analysed) {
         if (!analysed) {
-            return result.hierarchy().method(target).isPresent() ? "  … (açılmadı)" : "";
+            return result.hierarchy().method(target).isPresent() ? "  ... (acilmadi)" : "";
         }
-        return printed.contains(target) ? "  ↻" : "";
+        return printed.contains(target) ? "  ^" : "";
     }
 
     private boolean hasUnexpandedAnalysable(CallEdge edge) {

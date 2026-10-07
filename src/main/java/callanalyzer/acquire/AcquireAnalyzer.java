@@ -69,7 +69,7 @@ public final class AcquireAnalyzer {
         this.classBytes = classBytes;
         this.acquirerSpec = MethodSpec.parse(acquirerSpec);
         if (this.acquirerSpec.methodName() == null) {
-            throw new IllegalArgumentException("--acquirer bir metot belirtmeli, ör. com.example.CarAcquirer#acquire");
+            throw new IllegalArgumentException("--acquirer bir metot belirtmeli, or. com.example.CarAcquirer#acquire");
         }
         this.acquirerClass = hierarchy.resolveClassName(this.acquirerSpec.className());
     }
@@ -258,7 +258,7 @@ public final class AcquireAnalyzer {
             if (cars.isEmpty()) {
                 String declared = Type.getReturnType(c.method().desc()).getInternalName();
                 cars.add(new AcquiredCar(concreteOf(declared), declared, c.method().toShortString()
-                        + " dönüş değeri" + at(flow, flow.insn(c.insn()))));
+                        + " donus degeri" + at(flow, flow.insn(c.insn()))));
             }
         } else if (src instanceof Parameter p) {
             cars.addAll(resolveFromCallers(flow, p, depth));

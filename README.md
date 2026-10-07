@@ -66,42 +66,42 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
     Yer     : sample.cars.Mechanic#check(sample.cars.ICar, int)  (Mechanic.java:8)  [derinlik 4, INTERFACE]
     Not     : ICar metodu
     Zincir  : App#main(String[])
-              └─ (App.java:8) Dealer#sell(Bmw)
-                 └─ (Dealer.java:10) Garage#service(ICar)
-                    └─ (Garage.java:7) Garage#inspect(ICar)
-                       └─ (Garage.java:12) Mechanic#check(ICar, int)
+              `- (App.java:8) Dealer#sell(Bmw)
+                 `- (Dealer.java:10) Garage#service(ICar)
+                    `- (Garage.java:7) Garage#inspect(ICar)
+                       `- (Garage.java:12) Mechanic#check(ICar, int)
 
 [14] ICar#brand()  ->  Bmw, Tesla, TowTruck
     Yer     : sample.cars.Diagnostics#report(sample.cars.ICar)  (Diagnostics.java:8)  [derinlik 5, INTERFACE]
     Zincir  : App#main(String[])
-              └─ (App.java:8) Dealer#sell(Bmw)
-                 └─ (Dealer.java:10) Garage#service(ICar)
-                    └─ (Garage.java:8) AbstractCar#start()
-                       └─ (AbstractCar.java:8) Engine#ignite()
-                          └─ (Engine.java:11) Diagnostics#report(ICar)
+              `- (App.java:8) Dealer#sell(Bmw)
+                 `- (Dealer.java:10) Garage#service(ICar)
+                    `- (Garage.java:8) AbstractCar#start()
+                       `- (AbstractCar.java:8) Engine#ignite()
+                          `- (Engine.java:11) Diagnostics#report(ICar)
 ```
 
-`--tree` ile çağrı ağacı (★ hedef tipe yapılan çağrı, ⇒ olası uygulama, ↻ daha önce açıldı):
+`--tree` ile çağrı ağacı (`*` hedef tipe yapılan çağrı, `=>` olası uygulama, `^` daha önce açıldı):
 
 ```
 App#main(String[])
-  → Dealer#sell(Bmw)  (App.java:8)
-    ★ Bmw#openSunroof()  (Dealer.java:9)  {Bmw}
-    → Garage#service(ICar)  (Dealer.java:10)
-      → Garage#inspect(ICar)  (Garage.java:7)
-        → Mechanic#check(ICar, int)  (Garage.java:12)
-          ★ ICar#brand()  (Mechanic.java:8)  {Bmw, Tesla, TowTruck}
-      ★ ICar#start()  (Garage.java:8)  {Bmw, Tesla, TowTruck}
-        ⇒ Bmw: AbstractCar#start()
-          → Engine#ignite()  (AbstractCar.java:8)
-            → Diagnostics#report(ICar)  (Engine.java:11)
-              ★ ICar#brand()  (Diagnostics.java:8)  {Bmw, Tesla, TowTruck}
-        ⇒ Tesla#start()
-          ★ Tesla#charge()  (Tesla.java:6)  {Tesla}
-  → Garage#serviceAll(List)  (App.java:11)
-    ★ ICar#stop()  (Garage.java:16)  [lambda]  {Bmw, Tesla, TowTruck}
-    → Garage#lambda$serviceAll$0(ICar)  (Garage.java:17)  [lambda]
-      ★ ICar#honk()  (Garage.java:17)  {Bmw, Tesla, TowTruck}
+  -> Dealer#sell(Bmw)  (App.java:8)
+    * Bmw#openSunroof()  (Dealer.java:9)  {Bmw}
+    -> Garage#service(ICar)  (Dealer.java:10)
+      -> Garage#inspect(ICar)  (Garage.java:7)
+        -> Mechanic#check(ICar, int)  (Garage.java:12)
+          * ICar#brand()  (Mechanic.java:8)  {Bmw, Tesla, TowTruck}
+      * ICar#start()  (Garage.java:8)  {Bmw, Tesla, TowTruck}
+        => Bmw: AbstractCar#start()
+          -> Engine#ignite()  (AbstractCar.java:8)
+            -> Diagnostics#report(ICar)  (Engine.java:11)
+              * ICar#brand()  (Diagnostics.java:8)  {Bmw, Tesla, TowTruck}
+        => Tesla#start()
+          * Tesla#charge()  (Tesla.java:6)  {Tesla}
+  -> Garage#serviceAll(List)  (App.java:11)
+    * ICar#stop()  (Garage.java:16)  [lambda]  {Bmw, Tesla, TowTruck}
+    -> Garage#lambda$serviceAll$0(ICar)  (Garage.java:17)  [lambda]
+      * ICar#honk()  (Garage.java:17)  {Bmw, Tesla, TowTruck}
 ```
 
 Raporun sonunda, uygulama sınıfı bazında hangi metotların kaç yerden çağrılabildiğini gösteren bir özet de vardır.
@@ -131,29 +131,29 @@ public void rent() {
 ```
 
 ```
-=== Acquire karşılaştırması: com.example.CarAcquirer#acquire ===
-Çağrı: RentalService#rent()  (RentalService.java:14)
+=== Acquire karsilastirmasi: com.example.CarAcquirer#acquire ===
+Cagri: RentalService#rent()  (RentalService.java:14)
     Bmw            <- alan RentalService.bmw : Bmw
     Tesla          <- alan RentalService.tesla : Tesla
-Listedeki sınıflar   : Bmw, Tesla
-Akışta kullanılanlar : Bmw, Tesla, TowTruck
+Listedeki siniflar   : Bmw, Tesla
+Akista kullanilanlar : Bmw, Tesla, TowTruck
 
-✗ EKSİK — akışta kesin olarak bu sınıfa çağrı var ama listede yok:
+[X] EKSIK - akista kesin olarak bu sinifa cagri var ama listede yok:
   com.example.TowTruck
       TowTruck#tow(ICar)           RentalService#rent() (RentalService.java:17)
 
-✓ Listede ve kullanılıyor: Bmw, Tesla
+[OK] Listede ve kullaniliyor: Bmw, Tesla
 ```
 
 Sonuç kategorileri:
 
 | Kategori | Anlamı |
 |---|---|
-| `✗ EKSİK` | Çağrının hedefi kesin olarak bu sınıf (ör. `Bmw` tipli alan üzerinden `bmw.x()`), ama sınıf listede yok. |
-| `? OLASI EKSİK` | Sınıf yalnızca `ICar` arayüzü üzerinden yapılan çağrılarda olası hedeflerden biri (statik analiz hangi nesnenin geleceğini bilemez) ve listede yok. |
-| `~ BELİRSİZ` | Listede sınıfı belirlenemeyen bir eleman var (ör. `ICar` tipli bir alan); bu sınıf o eleman olabilir. |
-| `! LİSTEDE OLUP KULLANILMAYAN` | Listeye konmuş ama akışta hiç çağrılmayan sınıflar. |
-| `✓` | Listede olan ve kullanılan sınıflar. |
+| `[X] EKSIK` | Çağrının hedefi kesin olarak bu sınıf (ör. `Bmw` tipli alan üzerinden `bmw.x()`), ama sınıf listede yok. |
+| `? OLASI EKSIK` | Sınıf yalnızca `ICar` arayüzü üzerinden yapılan çağrılarda olası hedeflerden biri (statik analiz hangi nesnenin geleceğini bilemez) ve listede yok. |
+| `~ BELIRSIZ` | Listede sınıfı belirlenemeyen bir eleman var (ör. `ICar` tipli bir alan); bu sınıf o eleman olabilir. |
+| `! LISTEDE OLUP AKISTA KULLANILMAYAN` | Listeye konmuş ama akışta hiç çağrılmayan sınıflar. |
+| `[OK]` | Listede olan ve kullanılan sınıflar. |
 
 Listenin içeriği bytecode üzerinde veri akışı analiziyle bulunur. Desteklenen kurulumlar:
 
@@ -190,6 +190,9 @@ for (Finding f : result.findings()) { ... }
    metot bir kez incelenir. Bu sayede bulgu başına en kısa çağrı zinciri elde edilir.
 4. Bir çağrı, statik alıcı tipi hedef tipin alt tipiyse **ya da** dinamik bağlamayla hedef tipi uygulayan bir
    sınıfa ulaşabiliyorsa raporlanır (ikinci durum “olası” olarak işaretlenir).
+
+Çıktı yalnızca ASCII karakterlerden oluşur (Türkçe harfler ve özel semboller kullanılmaz), böylece Windows
+`cmd` penceresinde de düzgün görünür.
 
 ## Sınırlamalar
 

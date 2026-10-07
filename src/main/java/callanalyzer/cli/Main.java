@@ -29,37 +29,37 @@ import java.util.List;
 public final class Main {
 
     private static final String USAGE = """
-            Kullanım:
-              java -jar call-analyzer.jar --cp <sınıf-yolu> --entry <metot> --target <tip> [seçenekler]
+            Kullanim:
+              java -jar call-analyzer.jar --cp <sinif-yolu> --entry <metot> --target <tip> [secenekler]
 
             Zorunlu:
-              --cp, -cp <yol>            Analiz edilecek derlenmiş kod: sınıf dizini (target/classes), .jar
-                                         ya da dizin/* ; ':' (Windows'ta ';') ile ayrılabilir, tekrarlanabilir.
-              --entry, -e <metot>        Başlangıç metodu. Örnekler:
+              --cp, -cp <yol>            Analiz edilecek derlenmis kod: sinif dizini (target/classes), .jar
+                                         ya da dizin/* ; ':' (Windows'ta ';') ile ayrilabilir, tekrarlanabilir.
+              --entry, -e <metot>        Baslangic metodu. Ornekler:
                                            com.example.Garage#service
                                            com.example.Garage#service(ICar, int)
                                            com.example.Garage#service(Lcom/example/ICar;I)V
-                                           com.example.Garage           (sınıftaki tüm metotlar)
+                                           com.example.Garage           (siniftaki tum metotlar)
                                          Tekrarlanabilir.
-              --target, -t <tip>         Uygulayıcıları aranan arayüz/sınıf, ör. com.example.ICar. Tekrarlanabilir.
+              --target, -t <tip>         Uygulayicilari aranan arayuz/sinif, or. com.example.ICar. Tekrarlanabilir.
 
-            Seçenekler:
-              --include <paket>          Yalnızca bu önekle başlayan sınıfların içine gir (tekrarlanabilir).
-              --exclude <paket>          Bu önekle başlayan sınıfların içine girme (tekrarlanabilir).
-              --max-depth <n>            En fazla n seviye derine in (varsayılan: sınırsız).
-              --include-constructors     'new Bmw()' gibi kurucu çağrılarını da raporla.
-              --only-interface-methods   Yalnızca hedef tipin kendi metotlarını raporla (ör. ICar metotları).
-              --skip-internal            Hedef tipi uygulayan sınıfların kendi içinden yapılan çağrıları raporlama.
-              --direct-only              Yalnızca statik alıcı tipi hedef tipten olan çağrıları raporla
-                                         (ör. Object#toString() üzerinden 'olası' eşleşmeleri atla).
-              --acquirer <metot>         Ör. com.example.CarAcquirer#acquire : akıştaki bu çağrılara verilen
-                                         listedeki hedef tip nesnelerini bulur ve akışta kullanılan sınıflarla
-                                         karşılaştırır (listede olmayanları raporlar).
-              --fail-on-missing          --acquirer ile kesin eksik sınıf bulunursa çıkış kodu 3 olsun (CI için).
-              --tree                     Gezilen çağrı ağacını da yazdır.
-              --format text|json         Çıktı biçimi (varsayılan: text).
-              --output, -o <dosya>       Çıktıyı dosyaya yaz.
-              --help, -h                 Bu yardımı göster.
+            Secenekler:
+              --include <paket>          Yalnizca bu onekle baslayan siniflarin icine gir (tekrarlanabilir).
+              --exclude <paket>          Bu onekle baslayan siniflarin icine girme (tekrarlanabilir).
+              --max-depth <n>            En fazla n seviye derine in (varsayilan: sinirsiz).
+              --include-constructors     'new Bmw()' gibi kurucu cagrilarini da raporla.
+              --only-interface-methods   Yalnizca hedef tipin kendi metotlarini raporla (or. ICar metotlari).
+              --skip-internal            Hedef tipi uygulayan siniflarin kendi icinden yapilan cagrilari raporlama.
+              --direct-only              Yalnizca statik alici tipi hedef tipten olan cagrilari raporla
+                                         (or. Object#toString() uzerinden 'olasi' eslesmeleri atla).
+              --acquirer <metot>         Or. com.example.CarAcquirer#acquire : akistaki bu cagrilara verilen
+                                         listedeki hedef tip nesnelerini bulur ve akista kullanilan siniflarla
+                                         karsilastirir (listede olmayanlari raporlar).
+              --fail-on-missing          --acquirer ile kesin eksik sinif bulunursa cikis kodu 3 olsun (CI icin).
+              --tree                     Gezilen cagri agacini da yazdir.
+              --format text|json         Cikti bicimi (varsayilan: text).
+              --output, -o <dosya>       Ciktiyi dosyaya yaz.
+              --help, -h                 Bu yardimi goster.
             """;
 
     private Main() {
@@ -107,14 +107,14 @@ public final class Main {
                     case "--fail-on-missing" -> failOnMissing = true;
                     case "--format" -> format = value(args, ++i, a);
                     case "--output", "-o" -> output = Path.of(value(args, ++i, a));
-                    default -> throw new IllegalArgumentException("Bilinmeyen argüman: " + a);
+                    default -> throw new IllegalArgumentException("Bilinmeyen arguman: " + a);
                 }
             }
             if (classPath.isEmpty() || options.entries().isEmpty() || options.targets().isEmpty()) {
                 throw new IllegalArgumentException("--cp, --entry ve --target zorunludur.");
             }
             if (!format.equals("text") && !format.equals("json")) {
-                throw new IllegalArgumentException("Geçersiz --format: " + format);
+                throw new IllegalArgumentException("Gecersiz --format: " + format);
             }
         } catch (IllegalArgumentException e) {
             stderr.println("Hata: " + e.getMessage());
@@ -127,7 +127,7 @@ public final class Main {
             ClassPathLoader loader = ClassPathLoader.load(classPath);
             loader.warnings().forEach(w -> stderr.println("UYARI: " + w));
             if (loader.classes().isEmpty()) {
-                stderr.println("Hata: sınıf yolunda hiç .class dosyası bulunamadı.");
+                stderr.println("Hata: sinif yolunda hic .class dosyasi bulunamadi.");
                 return 1;
             }
             ClassHierarchy hierarchy = new ClassHierarchy(loader.classes());
@@ -156,7 +156,7 @@ public final class Main {
                 if (output != null) out.close();
             }
             if (output != null) {
-                stderr.println(result.findings().size() + " çağrı bulundu, rapor yazıldı: " + output);
+                stderr.println(result.findings().size() + " cagri bulundu, rapor yazildi: " + output);
             }
             if (failOnMissing && acquire != null && !acquire.missing().isEmpty()) {
                 return 3;
@@ -166,14 +166,14 @@ public final class Main {
             stderr.println("Hata: " + e.getMessage());
             return 1;
         } catch (IOException e) {
-            stderr.println("G/Ç hatası: " + e.getMessage());
+            stderr.println("G/C hatasi: " + e.getMessage());
             return 1;
         }
     }
 
     private static String value(String[] args, int index, String option) {
         if (index >= args.length) {
-            throw new IllegalArgumentException(option + " bir değer bekliyor.");
+            throw new IllegalArgumentException(option + " bir deger bekliyor.");
         }
         return args[index];
     }

@@ -42,19 +42,19 @@ public final class CallGraphAnalyzer {
 
     public AnalysisResult analyze() {
         if (options.entries().isEmpty()) {
-            throw new IllegalArgumentException("En az bir giriş metodu gerekli.");
+            throw new IllegalArgumentException("En az bir giris metodu gerekli.");
         }
         if (options.targets().isEmpty()) {
-            throw new IllegalArgumentException("En az bir hedef tip (ör. com.example.ICar) gerekli.");
+            throw new IllegalArgumentException("En az bir hedef tip (or. com.example.ICar) gerekli.");
         }
         List<String> warnings = new ArrayList<>();
         List<String> targets = new ArrayList<>();
         for (String t : options.targets()) {
             String internal = hierarchy.resolveClassName(t);
             if (!hierarchy.contains(internal)) {
-                warnings.add("Hedef tip sınıf yolunda yok, yalnızca adına göre eşleştirilecek: " + t);
+                warnings.add("Hedef tip sinif yolunda yok, yalnizca adina gore eslestirilecek: " + t);
             } else if (hierarchy.allSubtypes(internal).size() == 1) {
-                warnings.add("Hedef tipi uygulayan/genişleten yüklenmiş bir sınıf yok: " + t);
+                warnings.add("Hedef tipi uygulayan/genisleten yuklenmis bir sinif yok: " + t);
             }
             targets.add(internal);
         }

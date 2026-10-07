@@ -25,40 +25,40 @@ public final class AcquireReport {
 
     public static void writeText(AcquireComparison c, PrintWriter out) {
         out.println();
-        out.println("=== Acquire karşılaştırması: " + c.acquirer() + " ===");
+        out.println("=== Acquire karsilastirmasi: " + c.acquirer() + " ===");
         if (c.calls().isEmpty()) {
-            out.println("UYARI: Akışta bu metoda çağrı bulunamadı; kullanılan tüm sınıflar eksik sayıldı.");
+            out.println("UYARI: Akista bu metoda cagri bulunamadi; kullanilan tum siniflar eksik sayildi.");
         }
         for (AcquireCall call : c.calls()) {
-            out.println("Çağrı: " + call.caller().toShortString() + "  "
+            out.println("Cagri: " + call.caller().toShortString() + "  "
                     + TextReport.location(call.sourceFile(), call.line()));
             if (call.cars().isEmpty()) {
-                out.println("    (listede hedef tipten eleman bulunamadı)");
+                out.println("    (listede hedef tipten eleman bulunamadi)");
             }
             for (AcquiredCar car : call.cars()) {
                 String name = car.isResolved() ? MethodRef.simpleName(car.concreteClass()) : "?";
                 out.println("    " + pad(name, 14) + " <- " + car.origin()
-                        + (car.isResolved() ? "" : "  (sınıfı statik olarak belirlenemedi)"));
+                        + (car.isResolved() ? "" : "  (sinifi statik olarak belirlenemedi)"));
             }
         }
-        out.println("Listedeki sınıflar   : " + simpleNames(c.acquired()));
-        out.println("Akışta kullanılanlar : " + simpleNames(Stream.of(c.covered(), c.missing(), c.possiblyMissing(),
+        out.println("Listedeki siniflar   : " + simpleNames(c.acquired()));
+        out.println("Akista kullanilanlar : " + simpleNames(Stream.of(c.covered(), c.missing(), c.possiblyMissing(),
                 c.undecided()).flatMap(List::stream).map(ClassUsage::className).sorted().toList()));
 
-        section(out, "✗ EKSİK — akışta kesin olarak bu sınıfa çağrı var ama listede yok:", c.missing(), true);
-        section(out, "? OLASI EKSİK — yalnızca arayüz üzerinden (ör. ICar) çağrılıyor olabilir, listede yok:",
+        section(out, "[X] EKSIK - akista kesin olarak bu sinifa cagri var ama listede yok:", c.missing(), true);
+        section(out, "? OLASI EKSIK - yalnizca arayuz uzerinden (or. ICar) cagriliyor olabilir, listede yok:",
                 c.possiblyMissing(), false);
         if (!c.undecided().isEmpty()) {
-            section(out, "~ BELİRSİZ — listede sınıfı belirlenemeyen eleman var ("
+            section(out, "~ BELIRSIZ - listede sinifi belirlenemeyen eleman var ("
                     + c.unresolved().stream().map(AcquiredCar::origin).collect(Collectors.joining(", "))
-                    + "); bu sınıflar o eleman olabilir:", c.undecided(), true);
+                    + "); bu siniflar o eleman olabilir:", c.undecided(), true);
         }
         if (!c.unused().isEmpty()) {
             out.println();
-            out.println("! LİSTEDE OLUP AKIŞTA KULLANILMAYAN: " + simpleNames(c.unused()));
+            out.println("! LISTEDE OLUP AKISTA KULLANILMAYAN: " + simpleNames(c.unused()));
         }
         out.println();
-        out.println("✓ Listede ve kullanılıyor: "
+        out.println("[OK] Listede ve kullaniliyor: "
                 + simpleNames(c.covered().stream().map(ClassUsage::className).toList()));
         out.flush();
     }
@@ -79,10 +79,10 @@ public final class AcquireReport {
             for (Finding f : sites.subList(0, Math.min(MAX_SITES, sites.size()))) {
                 out.println("      " + pad(f.site().target().toShortString(), 28) + " "
                         + f.caller().toShortString() + " " + TextReport.location(f.callerSourceFile(), f.site().line())
-                        + (u.certain().contains(f) ? "" : "  [arayüz üzerinden]"));
+                        + (u.certain().contains(f) ? "" : "  [arayuz uzerinden]"));
             }
             if (sites.size() > MAX_SITES) {
-                out.println("      ... ve " + (sites.size() - MAX_SITES) + " çağrı yeri daha");
+                out.println("      ... ve " + (sites.size() - MAX_SITES) + " cagri yeri daha");
             }
         }
     }

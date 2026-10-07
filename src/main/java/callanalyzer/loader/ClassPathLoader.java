@@ -62,7 +62,7 @@ public final class ClassPathLoader {
         } else if (Files.isRegularFile(entry) && entry.toString().endsWith(".class")) {
             add(Files.readAllBytes(entry), entry.toString());
         } else {
-            warnings.add("Sınıf yolu girdisi bulunamadı ya da desteklenmiyor: " + entry);
+            warnings.add("Sinif yolu girdisi bulunamadi ya da desteklenmiyor: " + entry);
         }
     }
 
@@ -107,7 +107,7 @@ public final class ClassPathLoader {
                 classBytes.put(info.name(), bytes);
             }
         } catch (RuntimeException e) {
-            warnings.add("Sınıf okunamadı (" + origin + "): " + e);
+            warnings.add("Sinif okunamadi (" + origin + "): " + e);
         }
     }
 

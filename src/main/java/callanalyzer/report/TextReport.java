@@ -24,8 +24,8 @@ public final class TextReport {
 
     public static void write(AnalysisResult result, PrintWriter out) {
         ClassHierarchy h = result.hierarchy();
-        out.println("=== Metot Akışı Analizi ===");
-        out.println("Giriş metot(lar)ı : " + result.entries().stream()
+        out.println("=== Metot Akisi Analizi ===");
+        out.println("Giris metot(lar)i : " + result.entries().stream()
                 .map(MethodRef::toQualifiedString).collect(Collectors.joining(", ")));
         for (String target : result.targets()) {
             List<String> impls = h.allSubtypes(target).stream()
@@ -37,8 +37,8 @@ public final class TextReport {
                     + (impls.isEmpty() ? "" : "  (somut alt tipler: " + String.join(", ", impls) + ")"));
         }
         int maxDepth = result.depths().values().stream().mapToInt(Integer::intValue).max().orElse(0);
-        out.println("İncelenen metot   : " + result.analysedMethods().size() + "  (en derin seviye: " + maxDepth + ")");
-        out.println("Bulunan çağrı     : " + result.findings().size());
+        out.println("Incelenen metot   : " + result.analysedMethods().size() + "  (en derin seviye: " + maxDepth + ")");
+        out.println("Bulunan cagri     : " + result.findings().size());
         for (String w : result.warnings()) {
             out.println("UYARI: " + w);
         }
@@ -51,11 +51,11 @@ public final class TextReport {
                     + "  [derinlik " + f.depth() + ", " + f.site().kind() + "]");
             List<String> notes = new ArrayList<>();
             if (result.targets().size() > 1) notes.add("hedef: " + MethodRef.simpleName(f.targetType()));
-            if (f.site().viaLambda()) notes.add("lambda / metot referansı");
+            if (f.site().viaLambda()) notes.add("lambda / metot referansi");
             if (f.interfaceMethod()) notes.add(MethodRef.simpleName(f.targetType()) + " metodu");
-            if (!f.receiverTypeMatches()) notes.add("olası: statik alıcı tipi "
-                    + MethodRef.simpleName(f.site().target().owner()) + ", yalnızca dinamik bağlamayla ulaşılıyor");
-            if (f.internalCall()) notes.add("uygulama sınıfı içinden çağrı");
+            if (!f.receiverTypeMatches()) notes.add("olasi: statik alici tipi "
+                    + MethodRef.simpleName(f.site().target().owner()) + ", yalnizca dinamik baglamayla ulasiliyor");
+            if (f.internalCall()) notes.add("uygulama sinifi icinden cagri");
             if (!notes.isEmpty()) {
                 out.println("    Not     : " + String.join("; ", notes));
             }
@@ -68,7 +68,7 @@ public final class TextReport {
 
     private static String targetsText(Finding f) {
         if (f.matchedTargets().isEmpty()) {
-            return "(yüklenen sınıflarda uygulaması bulunamadı)";
+            return "(yuklenen siniflarda uygulamasi bulunamadi)";
         }
         return f.matchedTargets().stream()
                 .map(t -> MethodRef.simpleName(t.receiverClass()) + (t.method().owner().equals(t.receiverClass())
@@ -81,7 +81,7 @@ public final class TextReport {
         for (int i = 0; i < chain.size(); i++) {
             ChainStep step = chain.get(i);
             if (i > 0) {
-                sb.append("\n              ").append("   ".repeat(i - 1)).append("└─ ");
+                sb.append("\n              ").append("   ".repeat(i - 1)).append("`- ");
                 MethodRef prev = chain.get(i - 1).method();
                 ClassInfo prevClass = h.get(prev.owner());
                 sb.append(location(prevClass == null ? null : prevClass.sourceFile(), step.callLine())).append(' ');
@@ -114,13 +114,13 @@ public final class TextReport {
             }
         }
         out.println();
-        out.println("=== Uygulama sınıfı bazında özet ===");
+        out.println("=== Uygulama sinifi bazinda ozet ===");
         byClass.forEach((cls, methods) -> {
             out.println(cls);
-            methods.forEach((m, n) -> out.println("    " + m + "  <- " + n + " çağrı yeri"));
+            methods.forEach((m, n) -> out.println("    " + m + "  <- " + n + " cagri yeri"));
         });
         unresolved.forEach((owner, methods) -> {
-            out.println(owner + "  (uygulaması bulunamadı)");
+            out.println(owner + "  (uygulamasi bulunamadi)");
             methods.forEach(m -> out.println("    " + m));
         });
     }

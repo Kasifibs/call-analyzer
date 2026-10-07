@@ -46,7 +46,7 @@ public record MethodSpec(String text, String className, String methodName, Strin
             cls = s;
         }
         if (cls.isBlank()) {
-            throw new IllegalArgumentException("Metot tanımında sınıf adı yok: " + text);
+            throw new IllegalArgumentException("Metot taniminda sinif adi yok: " + text);
         }
         if (member == null || member.isBlank()) {
             return new MethodSpec(text, cls, null, null, null);
@@ -57,7 +57,7 @@ public record MethodSpec(String text, String className, String methodName, Strin
         }
         int close = member.lastIndexOf(')');
         if (close < open) {
-            throw new IllegalArgumentException("Parantezler eşleşmiyor: " + text);
+            throw new IllegalArgumentException("Parantezler eslesmiyor: " + text);
         }
         String name = member.substring(0, open);
         String inside = member.substring(open + 1, close);
@@ -102,7 +102,7 @@ public record MethodSpec(String text, String className, String methodName, Strin
         String internal = hierarchy.resolveClassName(className);
         ClassInfo cls = hierarchy.get(internal);
         if (cls == null) {
-            throw new IllegalArgumentException("Giriş sınıfı sınıf yolunda bulunamadı: " + className);
+            throw new IllegalArgumentException("Giris sinifi sinif yolunda bulunamadi: " + className);
         }
         List<MethodRef> matches = cls.allMethods().stream()
                 .map(MethodInfo::ref)
@@ -114,8 +114,8 @@ public record MethodSpec(String text, String className, String methodName, Strin
                     .map(m -> "  " + m.ref().toQualifiedString())
                     .sorted()
                     .collect(Collectors.joining("\n"));
-            throw new IllegalArgumentException("'" + text + "' ile eşleşen metot yok. "
-                    + MethodRef.toDottedName(internal) + " sınıfındaki metotlar:\n" + available);
+            throw new IllegalArgumentException("'" + text + "' ile eslesen metot yok. "
+                    + MethodRef.toDottedName(internal) + " sinifindaki metotlar:\n" + available);
         }
         return matches;
     }

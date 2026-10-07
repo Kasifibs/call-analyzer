@@ -10,6 +10,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,8 +37,8 @@ class MainTest {
         assertEquals(0, r.exit(), r.err());
         assertTrue(r.out().contains("[1] "));
         assertTrue(r.out().contains("Mechanic#check(ICar, int)"));
-        assertTrue(r.out().contains("=== Uygulama sınıfı bazında özet ==="));
-        assertTrue(r.out().contains("★ ICar#start()  (Garage.java:8)  {Bmw, Tesla, TowTruck}"));
+        assertTrue(r.out().contains("=== Uygulama sinifi bazinda ozet ==="));
+        assertTrue(r.out().contains("* ICar#start()  (Garage.java:8)  {Bmw, Tesla, TowTruck}"));
     }
 
     @Test
@@ -57,12 +58,12 @@ class MainTest {
                 "--acquirer", "sample.cars.CarAcquirer#acquire", "--fail-on-missing", "--entry"};
         Run missing = run(concat(base, "sample.cars.RentalService#rent"));
         assertEquals(3, missing.exit(), missing.err());
-        assertTrue(missing.out().contains("✗ EKSİK"));
+        assertTrue(missing.out().contains("[X] EKSIK"));
         assertTrue(missing.out().contains("sample.cars.TowTruck"));
 
         Run ok = run(concat(base, "sample.cars.RentalService#rentOnlyBmw"));
         assertEquals(0, ok.exit(), ok.err());
-        assertTrue(ok.out().contains("? OLASI EKSİK"));
+        assertTrue(ok.out().contains("? OLASI EKSIK"));
 
         Run json = run(concat(base, "sample.cars.RentalService#rent", "--format", "json"));
         assertTrue(json.out().contains("\"missing\": [\n"));
@@ -73,6 +74,33 @@ class MainTest {
         String[] r = java.util.Arrays.copyOf(a, a.length + b.length);
         System.arraycopy(b, 0, r, a.length, b.length);
         return r;
+    }
+
+    /** Windows consoles (cmd) do not show non-ASCII text reliably, so every message must be plain ASCII. */
+    @Test
+    void outputIsPlainAscii() throws Exception {
+        String cp = Fixtures.sampleClassesDir().toString();
+        List<Run> runs = List.of(
+                run("--cp", cp, "--entry", "sample.cars.App#main", "--target", "sample.cars.ICar", "--tree",
+                        "--include-constructors"),
+                run("--cp", cp, "--entry", "sample.cars.App#main", "--target", "sample.cars.ICar", "--format", "json"),
+                run("--cp", cp, "--entry", "sample.cars.RentalService#rentWithSpare", "--target", "sample.cars.ICar",
+                        "--acquirer", "sample.cars.CarAcquirer#acquire", "--tree"),
+                run("--cp", cp, "--entry", "sample.cars.RentalService#rent", "--target", "sample.cars.ICar",
+                        "--acquirer", "sample.cars.CarAcquirer#acquire"),
+                run("--cp", cp, "--entry", "sample.cars.Dealer#sell", "--target", "sample.cars.ICar",
+                        "--acquirer", "sample.cars.CarAcquirer#acquire"),
+                run("--cp", cp, "--entry", "sample.cars.Garage#nope", "--target", "sample.cars.Nope"),
+                run("--cp", "does-not-exist", "--entry", "a.B#c", "--target", "a.I"),
+                run("--bogus"),
+                run("--help"));
+        for (Run r : runs) {
+            for (String text : List.of(r.out(), r.err())) {
+                assertTrue(text.chars().allMatch(c -> c < 128),
+                        () -> "non-ASCII output: " + text.chars().filter(c -> c >= 128)
+                                .mapToObj(c -> String.valueOf((char) c)).distinct().toList());
+            }
+        }
     }
 
     @Test
