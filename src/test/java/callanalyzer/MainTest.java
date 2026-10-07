@@ -52,6 +52,30 @@ class MainTest {
     }
 
     @Test
+    void acquirerComparisonAndFailOnMissing() throws Exception {
+        String[] base = {"--cp", Fixtures.sampleClassesDir().toString(), "--target", "sample.cars.ICar",
+                "--acquirer", "sample.cars.CarAcquirer#acquire", "--fail-on-missing", "--entry"};
+        Run missing = run(concat(base, "sample.cars.RentalService#rent"));
+        assertEquals(3, missing.exit(), missing.err());
+        assertTrue(missing.out().contains("✗ EKSİK"));
+        assertTrue(missing.out().contains("sample.cars.TowTruck"));
+
+        Run ok = run(concat(base, "sample.cars.RentalService#rentOnlyBmw"));
+        assertEquals(0, ok.exit(), ok.err());
+        assertTrue(ok.out().contains("? OLASI EKSİK"));
+
+        Run json = run(concat(base, "sample.cars.RentalService#rent", "--format", "json"));
+        assertTrue(json.out().contains("\"missing\": [\n"));
+        assertTrue(json.out().contains("\"origin\": \"alan RentalService.bmw : Bmw\""));
+    }
+
+    private static String[] concat(String[] a, String... b) {
+        String[] r = java.util.Arrays.copyOf(a, a.length + b.length);
+        System.arraycopy(b, 0, r, a.length, b.length);
+        return r;
+    }
+
+    @Test
     void usageErrors() throws Exception {
         Run missing = run("--cp", "x");
         assertEquals(2, missing.exit());

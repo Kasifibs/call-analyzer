@@ -50,6 +50,8 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--skip-internal` | `ICar` uygulayan sınıfların kendi içinden yaptığı çağrıları raporlama. |
 | `--direct-only` | Yalnızca statik tipi zaten hedef tipten olan çağrıları raporla (`Object#toString()` üzerinden “olası” eşleşmeleri atla). |
 | `--include-constructors` | `new Bmw()` gibi kurucu çağrılarını da raporla. |
+| `--acquirer <metot>` | Ör. `com.example.CarAcquirer#acquire`. Akışta bu metoda verilen listedeki `ICar` nesnelerini bulur ve akışta kullanılan sınıflarla karşılaştırır (bkz. aşağıda). |
+| `--fail-on-missing` | `--acquirer` ile kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
 | `--tree` | Gezilen çağrı ağacını da yazdır. |
 | `--format text\|json` | Çıktı biçimi. JSON, CI kontrolleri ya da başka araçlarla işlemek için. |
 | `-o <dosya>` | Çıktıyı dosyaya yaz. |
@@ -103,6 +105,67 @@ App#main(String[])
 ```
 
 Raporun sonunda, uygulama sınıfı bazında hangi metotların kaç yerden çağrılabildiğini gösteren bir özet de vardır.
+
+## Acquire listesi karşılaştırması (`--acquirer`)
+
+Akışın başında genellikle `CarAcquirer.acquire(List<ICar>)` gibi bir çağrı varsa, araç bu listeye konan `ICar`
+nesnelerini bulur ve akışta gerçekten çağrılan `ICar` sınıflarıyla karşılaştırır:
+
+```bash
+java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --cp uygulamam.jar \
+  --entry 'com.example.RentalService#rent' --target com.example.ICar \
+  --acquirer 'com.example.CarAcquirer#acquire'
+```
+
+```java
+@Autowired private Bmw bmw;
+@Autowired private Tesla tesla;
+@Autowired private TowTruck towTruck;
+
+public void rent() {
+    CarAcquirer.acquire(List.of(bmw, tesla));
+    bmw.openSunroof();
+    tesla.charge();
+    towTruck.tow(bmw);   // TowTruck listede yok!
+}
+```
+
+```
+=== Acquire karşılaştırması: com.example.CarAcquirer#acquire ===
+Çağrı: RentalService#rent()  (RentalService.java:14)
+    Bmw            <- alan RentalService.bmw : Bmw
+    Tesla          <- alan RentalService.tesla : Tesla
+Listedeki sınıflar   : Bmw, Tesla
+Akışta kullanılanlar : Bmw, Tesla, TowTruck
+
+✗ EKSİK — akışta kesin olarak bu sınıfa çağrı var ama listede yok:
+  com.example.TowTruck
+      TowTruck#tow(ICar)           RentalService#rent() (RentalService.java:17)
+
+✓ Listede ve kullanılıyor: Bmw, Tesla
+```
+
+Sonuç kategorileri:
+
+| Kategori | Anlamı |
+|---|---|
+| `✗ EKSİK` | Çağrının hedefi kesin olarak bu sınıf (ör. `Bmw` tipli alan üzerinden `bmw.x()`), ama sınıf listede yok. |
+| `? OLASI EKSİK` | Sınıf yalnızca `ICar` arayüzü üzerinden yapılan çağrılarda olası hedeflerden biri (statik analiz hangi nesnenin geleceğini bilemez) ve listede yok. |
+| `~ BELİRSİZ` | Listede sınıfı belirlenemeyen bir eleman var (ör. `ICar` tipli bir alan); bu sınıf o eleman olabilir. |
+| `! LİSTEDE OLUP KULLANILMAYAN` | Listeye konmuş ama akışta hiç çağrılmayan sınıflar. |
+| `✓` | Listede olan ve kullanılan sınıflar. |
+
+Listenin içeriği bytecode üzerinde veri akışı analiziyle bulunur. Desteklenen kurulumlar:
+
+- Somut tipli alanlar: `@Autowired Bmw bmw` → `acquire(List.of(bmw, tesla))`
+- `new`: `acquire(List.of(new Bmw(), new Tesla()))`, `Arrays.asList(...)`, `new ArrayList<>(List.of(...))`
+- `List<ICar> l = new ArrayList<>(); l.add(bmw); acquire(l)`
+- Listeyi döndüren bir metot (`acquire(cars())`), liste tutan bir alan (kurucuda doldurulan `fleet`)
+- Listenin parametre olarak gelmesi (`run(List.of(bmw))` → `run(List<ICar> cars) { acquire(cars); }`): akıştaki
+  çağıranlara bakılır.
+
+Karşılaştırmada şunlar sayılmaz: `acquire` metodunun kendi içindeki çağrılar, statik metotlar ve kurucular, bir
+`ICar` sınıfının kendi metotlarını çağırması (`this` üzerinden; nesne zaten hesaba katılmıştır).
 
 ## Programatik kullanım
 

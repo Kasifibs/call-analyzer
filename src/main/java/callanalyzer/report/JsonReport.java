@@ -1,5 +1,6 @@
 package callanalyzer.report;
 
+import callanalyzer.acquire.AcquireComparison;
 import callanalyzer.analysis.AnalysisResult;
 import callanalyzer.analysis.Finding;
 import callanalyzer.model.MethodRef;
@@ -16,12 +17,19 @@ public final class JsonReport {
     }
 
     public static void write(AnalysisResult result, PrintWriter out) {
+        write(result, null, out);
+    }
+
+    public static void write(AnalysisResult result, AcquireComparison acquire, PrintWriter out) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("entries", result.entries().stream().map(MethodRef::toQualifiedString).toList());
         root.put("targets", result.targets().stream().map(MethodRef::toDottedName).toList());
         root.put("analysedMethods", result.analysedMethods().size());
         root.put("warnings", result.warnings());
         root.put("findings", result.findings().stream().map(JsonReport::finding).toList());
+        if (acquire != null) {
+            root.put("acquire", AcquireReport.toJson(acquire));
+        }
         StringBuilder sb = new StringBuilder();
         append(sb, root, 0);
         out.println(sb);

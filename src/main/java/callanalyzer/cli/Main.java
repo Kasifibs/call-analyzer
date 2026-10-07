@@ -1,10 +1,13 @@
 package callanalyzer.cli;
 
+import callanalyzer.acquire.AcquireAnalyzer;
+import callanalyzer.acquire.AcquireComparison;
 import callanalyzer.analysis.AnalysisOptions;
 import callanalyzer.analysis.AnalysisResult;
 import callanalyzer.analysis.CallGraphAnalyzer;
 import callanalyzer.analysis.ClassHierarchy;
 import callanalyzer.loader.ClassPathLoader;
+import callanalyzer.report.AcquireReport;
 import callanalyzer.report.CallTreePrinter;
 import callanalyzer.report.JsonReport;
 import callanalyzer.report.TextReport;
@@ -49,6 +52,10 @@ public final class Main {
               --skip-internal            Hedef tipi uygulayan sınıfların kendi içinden yapılan çağrıları raporlama.
               --direct-only              Yalnızca statik alıcı tipi hedef tipten olan çağrıları raporla
                                          (ör. Object#toString() üzerinden 'olası' eşleşmeleri atla).
+              --acquirer <metot>         Ör. com.example.CarAcquirer#acquire : akıştaki bu çağrılara verilen
+                                         listedeki hedef tip nesnelerini bulur ve akışta kullanılan sınıflarla
+                                         karşılaştırır (listede olmayanları raporlar).
+              --fail-on-missing          --acquirer ile kesin eksik sınıf bulunursa çıkış kodu 3 olsun (CI için).
               --tree                     Gezilen çağrı ağacını da yazdır.
               --format text|json         Çıktı biçimi (varsayılan: text).
               --output, -o <dosya>       Çıktıyı dosyaya yaz.
@@ -69,6 +76,8 @@ public final class Main {
         List<Path> classPath = new ArrayList<>();
         AnalysisOptions options = new AnalysisOptions();
         boolean tree = false;
+        String acquirer = null;
+        boolean failOnMissing = false;
         String format = "text";
         Path output = null;
         try {
@@ -94,6 +103,8 @@ public final class Main {
                     case "--skip-internal" -> options.skipInternalCalls(true);
                     case "--direct-only" -> options.directOnly(true);
                     case "--tree" -> tree = true;
+                    case "--acquirer" -> acquirer = value(args, ++i, a);
+                    case "--fail-on-missing" -> failOnMissing = true;
                     case "--format" -> format = value(args, ++i, a);
                     case "--output", "-o" -> output = Path.of(value(args, ++i, a));
                     default -> throw new IllegalArgumentException("Bilinmeyen argüman: " + a);
@@ -121,15 +132,21 @@ public final class Main {
             }
             ClassHierarchy hierarchy = new ClassHierarchy(loader.classes());
             AnalysisResult result = new CallGraphAnalyzer(hierarchy, options).analyze();
+            AcquireComparison acquire = acquirer == null
+                    ? null
+                    : new AcquireAnalyzer(result, loader.classBytes(), acquirer).analyze();
 
             PrintWriter out = output == null
                     ? new PrintWriter(new OutputStreamWriter(stdout, StandardCharsets.UTF_8))
                     : new PrintWriter(Files.newBufferedWriter(output, StandardCharsets.UTF_8));
             try {
                 if (format.equals("json")) {
-                    JsonReport.write(result, out);
+                    JsonReport.write(result, acquire, out);
                 } else {
                     TextReport.write(result, out);
+                    if (acquire != null) {
+                        AcquireReport.writeText(acquire, out);
+                    }
                     if (tree) {
                         CallTreePrinter.write(result, out);
                     }
@@ -140,6 +157,9 @@ public final class Main {
             }
             if (output != null) {
                 stderr.println(result.findings().size() + " çağrı bulundu, rapor yazıldı: " + output);
+            }
+            if (failOnMissing && acquire != null && !acquire.missing().isEmpty()) {
+                return 3;
             }
             return 0;
         } catch (IllegalArgumentException e) {

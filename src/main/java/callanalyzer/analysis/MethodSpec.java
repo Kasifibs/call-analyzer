@@ -120,6 +120,11 @@ public record MethodSpec(String text, String className, String methodName, Strin
         return matches;
     }
 
+    /** Whether {@code ref}'s name and parameters match, ignoring its owner class. */
+    public boolean matchesSignature(MethodRef ref) {
+        return methodName != null && matches(ref);
+    }
+
     boolean matches(MethodRef ref) {
         if (methodName == null) {
             return !"<clinit>".equals(ref.name());

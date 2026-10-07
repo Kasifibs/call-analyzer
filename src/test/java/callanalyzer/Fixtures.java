@@ -10,11 +10,13 @@ import sample.cars.ICar;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 /** Loads the compiled {@code sample.cars} fixture application once and runs analyses on it. */
 public final class Fixtures {
 
     private static ClassHierarchy hierarchy;
+    private static Map<String, byte[]> classBytes;
 
     private Fixtures() {
     }
@@ -30,12 +32,19 @@ public final class Fixtures {
     public static synchronized ClassHierarchy hierarchy() {
         if (hierarchy == null) {
             try {
-                hierarchy = new ClassHierarchy(ClassPathLoader.load(List.of(sampleClassesDir())).classes());
+                ClassPathLoader loader = ClassPathLoader.load(List.of(sampleClassesDir()));
+                hierarchy = new ClassHierarchy(loader.classes());
+                classBytes = loader.classBytes();
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }
         }
         return hierarchy;
+    }
+
+    public static synchronized Map<String, byte[]> classBytes() {
+        hierarchy();
+        return classBytes;
     }
 
     public static AnalysisOptions fromMain() {

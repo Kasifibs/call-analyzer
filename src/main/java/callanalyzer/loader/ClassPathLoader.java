@@ -23,6 +23,7 @@ import java.util.zip.ZipFile;
 public final class ClassPathLoader {
 
     private final Map<String, ClassInfo> classes = new LinkedHashMap<>();
+    private final Map<String, byte[]> classBytes = new LinkedHashMap<>();
     private final List<String> warnings = new ArrayList<>();
 
     public static ClassPathLoader load(List<Path> entries) throws IOException {
@@ -35,6 +36,11 @@ public final class ClassPathLoader {
 
     public Map<String, ClassInfo> classes() {
         return classes;
+    }
+
+    /** Raw class files by internal name, for analyses that need the full method bodies (see {@code acquire}). */
+    public Map<String, byte[]> classBytes() {
+        return classBytes;
     }
 
     public List<String> warnings() {
@@ -97,7 +103,9 @@ public final class ClassPathLoader {
             if (info.name().equals("module-info") || info.name().endsWith("/module-info")) {
                 return;
             }
-            classes.putIfAbsent(info.name(), info);
+            if (classes.putIfAbsent(info.name(), info) == null) {
+                classBytes.put(info.name(), bytes);
+            }
         } catch (RuntimeException e) {
             warnings.add("Sınıf okunamadı (" + origin + "): " + e);
         }
