@@ -55,7 +55,10 @@ public final class Main {
               --acquirer <metot>         Or. com.example.CarAcquirer#acquire : akistaki bu cagrilara verilen
                                          listedeki hedef tip nesnelerini bulur ve akista kullanilan siniflarla
                                          karsilastirir (listede olmayanlari raporlar).
-              --fail-on-missing          --acquirer ile kesin eksik sinif bulunursa cikis kodu 3 olsun (CI icin).
+              --acquire-annotation <tip> Or. com.example.AcquireCar : analiz edilen (giris) metotta bu anotasyon
+                                         var mi bakar, icindeki siniflari (cars = {Opel.class, ...}) listeler ve
+                                         karsilastirmaya ekler. --acquirer ile birlikte de kullanilabilir.
+              --fail-on-missing          Karsilastirmada kesin eksik sinif bulunursa cikis kodu 3 olsun (CI icin).
               --tree                     Gezilen cagri agacini da yazdir.
               --format text|json         Cikti bicimi (varsayilan: text).
               --output, -o <dosya>       Ciktiyi dosyaya yaz.
@@ -77,6 +80,7 @@ public final class Main {
         AnalysisOptions options = new AnalysisOptions();
         boolean tree = false;
         String acquirer = null;
+        String acquireAnnotation = null;
         boolean failOnMissing = false;
         String format = "text";
         Path output = null;
@@ -104,6 +108,7 @@ public final class Main {
                     case "--direct-only" -> options.directOnly(true);
                     case "--tree" -> tree = true;
                     case "--acquirer" -> acquirer = value(args, ++i, a);
+                    case "--acquire-annotation" -> acquireAnnotation = value(args, ++i, a);
                     case "--fail-on-missing" -> failOnMissing = true;
                     case "--format" -> format = value(args, ++i, a);
                     case "--output", "-o" -> output = Path.of(value(args, ++i, a));
@@ -132,9 +137,9 @@ public final class Main {
             }
             ClassHierarchy hierarchy = new ClassHierarchy(loader.classes());
             AnalysisResult result = new CallGraphAnalyzer(hierarchy, options).analyze();
-            AcquireComparison acquire = acquirer == null
+            AcquireComparison acquire = acquirer == null && acquireAnnotation == null
                     ? null
-                    : new AcquireAnalyzer(result, loader.classBytes(), acquirer).analyze();
+                    : new AcquireAnalyzer(result, loader.classBytes(), acquirer, acquireAnnotation).analyze();
 
             PrintWriter out = output == null
                     ? new PrintWriter(new OutputStreamWriter(stdout, StandardCharsets.UTF_8))

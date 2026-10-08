@@ -3,6 +3,7 @@ package callanalyzer;
 import callanalyzer.acquire.AcquireAnalyzer;
 import callanalyzer.acquire.AcquireComparison;
 import callanalyzer.acquire.AcquiredCar;
+import callanalyzer.acquire.AnnotationCheck;
 import callanalyzer.acquire.ClassUsage;
 import callanalyzer.analysis.AnalysisOptions;
 import callanalyzer.analysis.AnalysisResult;
@@ -12,6 +13,7 @@ import java.util.List;
 
 import static callanalyzer.Fixtures.analyze;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AcquireAnalyzerTest {
@@ -19,6 +21,11 @@ class AcquireAnalyzerTest {
     private static AcquireComparison compare(String entry) {
         AnalysisResult result = analyze(new AnalysisOptions().entry(entry).target("sample.cars.ICar"));
         return new AcquireAnalyzer(result, Fixtures.classBytes(), "sample.cars.CarAcquirer#acquire").analyze();
+    }
+
+    private static AcquireComparison compare(String entry, String acquirer, String annotation) {
+        AnalysisResult result = analyze(new AnalysisOptions().entry(entry).target("sample.cars.ICar"));
+        return new AcquireAnalyzer(result, Fixtures.classBytes(), acquirer, annotation).analyze();
     }
 
     private static List<String> names(List<ClassUsage> usages) {
@@ -87,5 +94,47 @@ class AcquireAnalyzerTest {
         AcquireComparison c = compare("sample.cars.Dealer#sell");
         assertTrue(c.calls().isEmpty());
         assertTrue(names(c.missing()).contains("Bmw"));
+    }
+
+    @Test
+    void annotationClassesAreListedAndCompared() {
+        AcquireComparison c = compare("sample.cars.RentalService#rentAnnotated", null, "sample.cars.AcquireCar");
+        assertEquals(1, c.annotations().size());
+        AnnotationCheck a = c.annotations().get(0);
+        assertTrue(a.present());
+        assertEquals(List.of("sample/cars/Bmw", "sample/cars/TowTruck"),
+                a.cars().stream().map(AcquiredCar::concreteClass).toList());
+        assertTrue(c.calls().isEmpty());
+        assertEquals(List.of("Bmw", "TowTruck"), acquired(c));
+        assertEquals(List.of("Tesla"), names(c.missing()));
+        assertEquals(List.of("Bmw", "TowTruck"), names(c.covered()));
+    }
+
+    @Test
+    void annotationAndAcquirerCallAreCombined() {
+        AcquireComparison c = compare("sample.cars.RentalService#rentAnnotatedAndAcquired",
+                "sample.cars.CarAcquirer#acquire", "sample.cars.AcquireCar");
+        assertEquals(List.of("Bmw", "Tesla"), acquired(c)); // Bmw from the call, Tesla from the annotation
+        assertEquals(List.of("TowTruck"), names(c.missing()));
+    }
+
+    @Test
+    void missingAnnotationIsReported() {
+        AcquireComparison c = compare("sample.cars.RentalService#rent", null, "sample.cars.AcquireCar");
+        assertEquals(1, c.annotations().size());
+        assertFalse(c.annotations().get(0).present());
+        assertTrue(c.acquired().isEmpty());
+        assertEquals(List.of("Bmw", "Tesla", "TowTruck"), names(c.missing()));
+    }
+
+    @Test
+    void classRetentionAnnotationIsFoundAndNonTargetClassesAreFlagged() {
+        AcquireComparison c = compare("sample.cars.RentalService#rentLegacyAnnotated", null,
+                "sample.cars.LegacyAcquireCar");
+        AnnotationCheck a = c.annotations().get(0);
+        assertTrue(a.present());
+        assertEquals(2, a.cars().size());
+        assertTrue(a.cars().get(1).origin().contains("hedef tipi uygulamiyor"));
+        assertEquals(List.of("Bmw"), names(c.covered()));
     }
 }

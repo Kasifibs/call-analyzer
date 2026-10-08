@@ -70,6 +70,18 @@ class MainTest {
         assertTrue(json.out().contains("\"origin\": \"alan RentalService.bmw : Bmw\""));
     }
 
+    @Test
+    void annotationComparison() throws Exception {
+        Run r = run("--cp", Fixtures.sampleClassesDir().toString(), "--target", "sample.cars.ICar",
+                "--entry", "sample.cars.RentalService#rentAnnotated", "--acquire-annotation", "sample.cars.AcquireCar",
+                "--fail-on-missing");
+        assertEquals(3, r.exit(), r.err());
+        assertTrue(r.out().contains("=== Acquire karsilastirmasi: @sample.cars.AcquireCar ==="));
+        assertTrue(r.out().contains("Anotasyon @AcquireCar: VAR  RentalService#rentAnnotated()"));
+        assertTrue(r.out().contains("@AcquireCar ile verildi: Bmw.class"));
+        assertTrue(r.out().contains("[X] EKSIK"));
+    }
+
     private static String[] concat(String[] a, String... b) {
         String[] r = java.util.Arrays.copyOf(a, a.length + b.length);
         System.arraycopy(b, 0, r, a.length, b.length);
@@ -90,6 +102,11 @@ class MainTest {
                         "--acquirer", "sample.cars.CarAcquirer#acquire"),
                 run("--cp", cp, "--entry", "sample.cars.Dealer#sell", "--target", "sample.cars.ICar",
                         "--acquirer", "sample.cars.CarAcquirer#acquire"),
+                run("--cp", cp, "--entry", "sample.cars.RentalService", "--target", "sample.cars.ICar",
+                        "--acquirer", "sample.cars.CarAcquirer#acquire", "--acquire-annotation",
+                        "sample.cars.AcquireCar", "--format", "json"),
+                run("--cp", cp, "--entry", "sample.cars.RentalService#rentLegacyAnnotated", "--target",
+                        "sample.cars.ICar", "--acquire-annotation", "sample.cars.LegacyAcquireCar"),
                 run("--cp", cp, "--entry", "sample.cars.Garage#nope", "--target", "sample.cars.Nope"),
                 run("--cp", "does-not-exist", "--entry", "a.B#c", "--target", "a.I"),
                 run("--bogus"),

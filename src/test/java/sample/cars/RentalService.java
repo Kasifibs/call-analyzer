@@ -31,4 +31,24 @@ public class RentalService {
         CarAcquirer.acquire(List.of(bmw, tesla));
         bmw.openSunroof(); // tesla acquired but never used
     }
+
+    @AcquireCar(cars = {Bmw.class, TowTruck.class})
+    public void rentAnnotated() {
+        bmw.openSunroof();
+        tesla.charge(); // Tesla is used but not in the annotation
+        towTruck.tow(bmw);
+    }
+
+    @AcquireCar(cars = Tesla.class)
+    public void rentAnnotatedAndAcquired() {
+        CarAcquirer.acquire(List.of(bmw));
+        bmw.openSunroof();
+        tesla.charge();
+        towTruck.tow(bmw); // TowTruck is neither in the annotation nor in the list
+    }
+
+    @LegacyAcquireCar({Bmw.class, Bicycle.class})
+    public void rentLegacyAnnotated() {
+        bmw.openSunroof();
+    }
 }

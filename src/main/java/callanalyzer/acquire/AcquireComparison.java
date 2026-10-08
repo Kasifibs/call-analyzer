@@ -3,10 +3,13 @@ package callanalyzer.acquire;
 import java.util.List;
 
 /**
- * Comparison of the classes acquired via the acquirer method with the classes used in the flow.
+ * Comparison of the classes acquired via the acquirer method and/or the acquire annotation with the classes used in
+ * the flow.
  *
- * @param acquirer        the acquirer method selector as given by the user
+ * @param acquirer        the acquirer method selector as given by the user, {@code null} if not used
+ * @param annotation      the acquire annotation type (internal name), {@code null} if not used
  * @param calls           every acquirer call found in the flow
+ * @param annotations     for every entry method, whether it carries the acquire annotation and its classes
  * @param acquired        resolved classes in the acquired lists (internal names, sorted)
  * @param unresolved      list elements whose class could not be determined
  * @param covered         used classes that are in the list
@@ -15,7 +18,8 @@ import java.util.List;
  * @param undecided       classes not in the list but possibly covered by an unresolved element
  * @param unused          acquired classes that are not used in the flow
  */
-public record AcquireComparison(String acquirer, List<AcquireCall> calls, List<String> acquired,
+public record AcquireComparison(String acquirer, String annotation, List<AcquireCall> calls,
+                                List<AnnotationCheck> annotations, List<String> acquired,
                                 List<AcquiredCar> unresolved, List<ClassUsage> covered, List<ClassUsage> missing,
                                 List<ClassUsage> possiblyMissing, List<ClassUsage> undecided, List<String> unused) {
 }

@@ -20,8 +20,10 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
@@ -37,9 +39,10 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
- * Finds the calls of an "acquirer" method (e.g. {@code CarAcquirer.acquire(List<ICar>)}) in an analysed flow,
- * determines which target implementations are put into the list it receives, and compares them with the
- * implementations the flow actually calls.
+ * Finds the calls of an "acquirer" method (e.g. {@code CarAcquirer.acquire(List<ICar>)}) in an analysed flow and
+ * determines which target implementations are put into the list it receives; and/or reads the acquire annotation
+ * on the entry methods (e.g. {@code @AcquireCar(cars = {Opel.class, Mercedes.class})}). The acquired classes are
+ * then compared with the implementations the flow actually calls.
  *
  * <p>The list contents are recovered with an intra-procedural data-flow analysis that follows values back to
  * {@code new X()}, fields (by their declared type, e.g. {@code @Autowired Bmw bmw}), method return values,
@@ -57,6 +60,7 @@ public final class AcquireAnalyzer {
     private final AnalysisResult result;
     private final MethodSpec acquirerSpec;
     private final String acquirerClass;
+    private final String annotationType;
 
     private final Map<String, Optional<ClassNode>> classNodes = new HashMap<>();
     private final Map<MethodRef, Optional<MethodDataFlow>> flows = new HashMap<>();
@@ -64,14 +68,33 @@ public final class AcquireAnalyzer {
     private final Set<List<Object>> inProgress = new HashSet<>();
 
     public AcquireAnalyzer(AnalysisResult result, Map<String, byte[]> classBytes, String acquirerSpec) {
+        this(result, classBytes, acquirerSpec, null);
+    }
+
+    /**
+     * @param acquirerSpec   acquirer method, e.g. {@code com.example.CarAcquirer#acquire}; may be {@code null}
+     * @param annotationType acquire annotation, e.g. {@code com.example.AcquireCar}; may be {@code null}
+     */
+    public AcquireAnalyzer(AnalysisResult result, Map<String, byte[]> classBytes, String acquirerSpec,
+                           String annotationType) {
+        if (acquirerSpec == null && annotationType == null) {
+            throw new IllegalArgumentException("Acquire metodu ya da anotasyonu verilmeli.");
+        }
         this.result = result;
         this.hierarchy = result.hierarchy();
         this.classBytes = classBytes;
-        this.acquirerSpec = MethodSpec.parse(acquirerSpec);
-        if (this.acquirerSpec.methodName() == null) {
-            throw new IllegalArgumentException("--acquirer bir metot belirtmeli, or. com.example.CarAcquirer#acquire");
+        if (acquirerSpec != null) {
+            this.acquirerSpec = MethodSpec.parse(acquirerSpec);
+            if (this.acquirerSpec.methodName() == null) {
+                throw new IllegalArgumentException(
+                        "--acquirer bir metot belirtmeli, or. com.example.CarAcquirer#acquire");
+            }
+            this.acquirerClass = hierarchy.resolveClassName(this.acquirerSpec.className());
+        } else {
+            this.acquirerSpec = null;
+            this.acquirerClass = null;
         }
-        this.acquirerClass = hierarchy.resolveClassName(this.acquirerSpec.className());
+        this.annotationType = annotationType == null ? null : hierarchy.resolveClassName(annotationType);
     }
 
     public AcquireComparison analyze() {
@@ -91,24 +114,27 @@ public final class AcquireAnalyzer {
             }
         }
 
+        List<AnnotationCheck> annotations = annotationType == null ? List.of() : annotationChecks();
+
         Set<String> acquired = new TreeSet<>();
         List<AcquiredCar> unresolved = new ArrayList<>();
-        for (AcquireCall call : calls) {
-            for (AcquiredCar car : call.cars()) {
-                if (car.isResolved()) {
-                    acquired.add(car.concreteClass());
-                } else if (!unresolved.contains(car)) {
-                    unresolved.add(car);
-                }
+        List<AcquiredCar> allCars = new ArrayList<>();
+        calls.forEach(c -> allCars.addAll(c.cars()));
+        annotations.forEach(a -> allCars.addAll(a.cars()));
+        for (AcquiredCar car : allCars) {
+            if (car.isResolved()) {
+                acquired.add(car.concreteClass());
+            } else if (!unresolved.contains(car)) {
+                unresolved.add(car);
             }
         }
-        return compare(calls, acquired, unresolved, acquirerMethods);
+        return compare(calls, annotations, acquired, unresolved, acquirerMethods);
     }
 
     // ------------------------------------------------------------------------------------------------ comparison
 
-    private AcquireComparison compare(List<AcquireCall> calls, Set<String> acquired, List<AcquiredCar> unresolved,
-                                      Set<MethodRef> acquirerMethods) {
+    private AcquireComparison compare(List<AcquireCall> calls, List<AnnotationCheck> annotations, Set<String> acquired,
+                                      List<AcquiredCar> unresolved, Set<MethodRef> acquirerMethods) {
         Map<String, List<Finding>> certain = new TreeMap<>();
         Map<String, List<Finding>> possible = new TreeMap<>();
         for (Finding f : result.findings()) {
@@ -140,7 +166,8 @@ public final class AcquireAnalyzer {
         List<String> unused = acquired.stream()
                 .filter(a -> used.stream().noneMatch(u -> hierarchy.isSubtypeOf(u, a)))
                 .toList();
-        return new AcquireComparison(acquirerSpec.text(), List.copyOf(calls), List.copyOf(acquired),
+        return new AcquireComparison(acquirerSpec == null ? null : acquirerSpec.text(), annotationType,
+                List.copyOf(calls), List.copyOf(annotations), List.copyOf(acquired),
                 List.copyOf(unresolved), covered, missing, possiblyMissing, undecided, unused);
     }
 
@@ -174,7 +201,7 @@ public final class AcquireAnalyzer {
     // ----------------------------------------------------------------------------------------- finding acquirers
 
     private boolean isAcquirerCall(CallSite site, List<DispatchTarget> targets) {
-        if (!acquirerSpec.matchesSignature(site.target())) {
+        if (acquirerSpec == null || !acquirerSpec.matchesSignature(site.target())) {
             return false;
         }
         return hierarchy.isSubtypeOf(site.target().owner(), acquirerClass)
@@ -199,6 +226,63 @@ public final class AcquireAnalyzer {
             calls.add(new AcquireCall(flow.method(), flow.sourceFile(), flow.lineOf(insn), called, List.copyOf(cars)));
         }
         return calls;
+    }
+
+    // --------------------------------------------------------------------------------------------- annotation
+
+    /** Checks every entry method for the acquire annotation and collects the classes listed in it. */
+    private List<AnnotationCheck> annotationChecks() {
+        String desc = "L" + annotationType + ";";
+        String shortName = "@" + simple(annotationType);
+        List<AnnotationCheck> checks = new ArrayList<>();
+        for (MethodRef entry : result.entries()) {
+            ClassNode owner = classNode(entry.owner()).orElse(null);
+            MethodNode method = owner == null ? null : owner.methods.stream()
+                    .filter(m -> m.name.equals(entry.name()) && m.desc.equals(entry.desc()))
+                    .findFirst().orElse(null);
+            if (method == null) {
+                continue;
+            }
+            List<AnnotationNode> all = new ArrayList<>();
+            if (method.visibleAnnotations != null) all.addAll(method.visibleAnnotations);
+            if (method.invisibleAnnotations != null) all.addAll(method.invisibleAnnotations);
+            List<AnnotationNode> matching = all.stream().filter(a -> a.desc.equals(desc)).toList();
+            Set<AcquiredCar> cars = new LinkedHashSet<>();
+            for (AnnotationNode a : matching) {
+                List<Type> classes = new ArrayList<>();
+                collectClassValues(a.values, classes);
+                for (Type t : classes) {
+                    String cls = t.getInternalName();
+                    String concrete = hierarchy.contains(cls) ? concreteOf(cls) : cls;
+                    String origin = shortName + " ile verildi: " + simple(cls) + ".class"
+                            + (hierarchy.contains(cls) && !isTargetType(cls) ? "  (hedef tipi uygulamiyor!)" : "");
+                    cars.add(new AcquiredCar(concrete, cls, origin));
+                }
+            }
+            checks.add(new AnnotationCheck(entry, owner.sourceFile, firstLine(method), !matching.isEmpty(),
+                    List.copyOf(cars)));
+        }
+        return checks;
+    }
+
+    /** Class literals in annotation values, also inside arrays and nested annotations. */
+    private static void collectClassValues(Object values, List<Type> out) {
+        if (values instanceof Type t && t.getSort() == Type.OBJECT) {
+            out.add(t);
+        } else if (values instanceof List<?> list) {
+            list.forEach(v -> collectClassValues(v, out));
+        } else if (values instanceof AnnotationNode nested) {
+            collectClassValues(nested.values, out);
+        }
+    }
+
+    private static int firstLine(MethodNode m) {
+        for (AbstractInsnNode insn : m.instructions) {
+            if (insn instanceof LineNumberNode ln) {
+                return ln.line;
+            }
+        }
+        return -1;
     }
 
     // ------------------------------------------------------------------------------------- value resolution

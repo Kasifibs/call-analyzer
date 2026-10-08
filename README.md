@@ -51,7 +51,8 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--direct-only` | Yalnızca statik tipi zaten hedef tipten olan çağrıları raporla (`Object#toString()` üzerinden “olası” eşleşmeleri atla). |
 | `--include-constructors` | `new Bmw()` gibi kurucu çağrılarını da raporla. |
 | `--acquirer <metot>` | Ör. `com.example.CarAcquirer#acquire`. Akışta bu metoda verilen listedeki `ICar` nesnelerini bulur ve akışta kullanılan sınıflarla karşılaştırır (bkz. aşağıda). |
-| `--fail-on-missing` | `--acquirer` ile kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
+| `--acquire-annotation <tip>` | Ör. `com.example.AcquireCar`. Analiz edilen (giriş) metotta bu anotasyon var mı bakar, içinde verilen sınıfları listeler ve karşılaştırmaya ekler. `--acquirer` ile birlikte kullanılabilir. |
+| `--fail-on-missing` | Karşılaştırmada kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
 | `--tree` | Gezilen çağrı ağacını da yazdır. |
 | `--format text\|json` | Çıktı biçimi. JSON, CI kontrolleri ya da başka araçlarla işlemek için. |
 | `-o <dosya>` | Çıktıyı dosyaya yaz. |
@@ -135,25 +136,25 @@ public void rent() {
 Cagri: RentalService#rent()  (RentalService.java:14)
     Bmw            <- alan RentalService.bmw : Bmw
     Tesla          <- alan RentalService.tesla : Tesla
-Listedeki siniflar   : Bmw, Tesla
+Acquire edilenler    : Bmw, Tesla
 Akista kullanilanlar : Bmw, Tesla, TowTruck
 
-[X] EKSIK - akista kesin olarak bu sinifa cagri var ama listede yok:
+[X] EKSIK - akista kesin olarak bu sinifa cagri var ama acquire edilmemis (listede/anotasyonda yok):
   com.example.TowTruck
       TowTruck#tow(ICar)           RentalService#rent() (RentalService.java:17)
 
-[OK] Listede ve kullaniliyor: Bmw, Tesla
+[OK] Acquire edilmis ve kullaniliyor: Bmw, Tesla
 ```
 
 Sonuç kategorileri:
 
 | Kategori | Anlamı |
 |---|---|
-| `[X] EKSIK` | Çağrının hedefi kesin olarak bu sınıf (ör. `Bmw` tipli alan üzerinden `bmw.x()`), ama sınıf listede yok. |
-| `? OLASI EKSIK` | Sınıf yalnızca `ICar` arayüzü üzerinden yapılan çağrılarda olası hedeflerden biri (statik analiz hangi nesnenin geleceğini bilemez) ve listede yok. |
+| `[X] EKSIK` | Çağrının hedefi kesin olarak bu sınıf (ör. `Bmw` tipli alan üzerinden `bmw.x()`), ama sınıf acquire edilmemiş (listede/anotasyonda yok). |
+| `? OLASI EKSIK` | Sınıf yalnızca `ICar` arayüzü üzerinden yapılan çağrılarda olası hedeflerden biri (statik analiz hangi nesnenin geleceğini bilemez) ve acquire edilmemiş. |
 | `~ BELIRSIZ` | Listede sınıfı belirlenemeyen bir eleman var (ör. `ICar` tipli bir alan); bu sınıf o eleman olabilir. |
-| `! LISTEDE OLUP AKISTA KULLANILMAYAN` | Listeye konmuş ama akışta hiç çağrılmayan sınıflar. |
-| `[OK]` | Listede olan ve kullanılan sınıflar. |
+| `! ACQUIRE EDILIP AKISTA KULLANILMAYAN` | Listeye/anotasyona konmuş ama akışta hiç çağrılmayan sınıflar. |
+| `[OK]` | Acquire edilmiş ve kullanılan sınıflar. |
 
 Listenin içeriği bytecode üzerinde veri akışı analiziyle bulunur. Desteklenen kurulumlar:
 
@@ -166,6 +167,47 @@ Listenin içeriği bytecode üzerinde veri akışı analiziyle bulunur. Destekle
 
 Karşılaştırmada şunlar sayılmaz: `acquire` metodunun kendi içindeki çağrılar, statik metotlar ve kurucular, bir
 `ICar` sınıfının kendi metotlarını çağırması (`this` üzerinden; nesne zaten hesaba katılmıştır).
+
+## Acquire anotasyonu (`--acquire-annotation`)
+
+`CarAcquirer.acquire(...)` çağırmak yerine metodu bir anotasyonla işaretliyorsanız:
+
+```java
+@AcquireCar(cars = {Opel.class, Mercedes.class})
+public void rent() { ... }
+```
+
+```bat
+java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --cp uygulamam.jar --entry "com.example.RentalService#rent" --target com.example.ICar --acquire-annotation com.example.AcquireCar
+```
+
+Araç giriş metodunda anotasyonun olup olmadığını (`VAR` / `YOK`) ve içinde verilen sınıfları yazar; bu sınıflar
+acquire edilmiş sayılır ve yukarıdaki karşılaştırmaya eklenir. `--acquirer` ile birlikte verilirse anotasyondaki
+sınıflar ile `acquire(...)` listesindeki sınıflar birleştirilir.
+
+```
+=== Acquire karsilastirmasi: com.example.CarAcquirer#acquire, @com.example.AcquireCar ===
+Anotasyon @AcquireCar: VAR  RentalService#rent()  (RentalService.java:44)
+    Tesla          <- @AcquireCar ile verildi: Tesla.class
+Cagri: RentalService#rent()  (RentalService.java:44)
+    Bmw            <- alan RentalService.bmw : Bmw
+Acquire edilenler    : Bmw, Tesla
+Akista kullanilanlar : Bmw, Tesla, TowTruck
+
+[X] EKSIK - akista kesin olarak bu sinifa cagri var ama acquire edilmemis (listede/anotasyonda yok):
+  com.example.TowTruck
+      TowTruck#tow(ICar)           RentalService#rent() (RentalService.java:47)
+```
+
+Notlar:
+
+- Anotasyonun içindeki öznitelik adı önemli değildir (`cars`, `value`, ...); anotasyondaki tüm `X.class`
+  değerleri okunur. Tek sınıf da (`cars = Opel.class`), dizi de (`cars = {Opel.class, Mercedes.class}`) olur.
+- Anotasyon `RUNTIME` ya da varsayılan (`CLASS`) retention ile tanımlıysa bulunur. `@Retention(SOURCE)` ise
+  derlenmiş koda hiç yazılmadığı için görülemez.
+- Yalnızca giriş metodunun (`--entry`) kendi anotasyonuna bakılır; sınıf üzerindeki ya da akışta daha derindeki
+  metotlardaki anotasyonlar dikkate alınmaz.
+- Anotasyonda `ICar`'ı uygulamayan bir sınıf verilmişse yanında `(hedef tipi uygulamiyor!)` yazar.
 
 ## Programatik kullanım
 
