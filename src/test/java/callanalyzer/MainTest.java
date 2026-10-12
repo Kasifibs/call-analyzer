@@ -141,6 +141,35 @@ class MainTest {
     }
 
     @Test
+    void scanModeTextJsonAndHtml(@TempDir Path dir) throws Exception {
+        String cp = Fixtures.sampleClassesDir().toString();
+        String[] base = {"--cp", cp, "--scan", "--target", "sample.cars.ICar", "--include", "sample",
+                "--acquirer", "sample.cars.CarAcquirer#acquire", "--acquire-annotation", "sample.cars.AcquireCar"};
+        Run text = run(concat(base, "--fail-on-missing"));
+        assertEquals(3, text.exit(), text.err());
+        assertTrue(text.out().contains("=== Toplu acquire taramasi"));
+        assertTrue(text.out().contains("[X]    TowTruck"));
+        assertTrue(text.err().contains("metot bulundu"));
+
+        Run json = run(concat(base, "--format", "json"));
+        assertEquals(0, json.exit(), json.err());
+        assertTrue(json.out().contains("\"status\": \"MISSING\""));
+
+        Path index = dir.resolve("tarama.html");
+        Run html = run(concat(base, "--format", "html", "-o", index.toString()));
+        assertEquals(0, html.exit(), html.err());
+        String page = Files.readString(index);
+        assertTrue(page.chars().allMatch(c -> c < 128));
+        assertTrue(page.contains("tarama_metotlar/"));
+        try (var files = Files.list(dir.resolve("tarama_metotlar"))) {
+            assertTrue(files.count() > 10);
+        }
+
+        assertEquals(2, run(concat(base, "--format", "html")).exit(), "html scan needs -o");
+        assertEquals(2, run(concat(base, "--entry", "a.B#c")).exit(), "--scan and --entry exclude each other");
+    }
+
+    @Test
     void eventOptionsMustBeGivenTogether() throws Exception {
         Run r = run("--cp", Fixtures.sampleClassesDir().toString(), "--entry", "sample.events.EventFlowService#rent",
                 "--target", "sample.cars.ICar", "--event-class", "sample.events.Event");
@@ -178,6 +207,10 @@ class MainTest {
                 run("--cp", cp, "--entry", "sample.events.EventFlowService", "--target", "sample.cars.ICar",
                         "--event-class", "sample.events.Event", "--event-dispatcher", "sample.events.EventDispatcher",
                         "--event-observer", "sample.events.IObserver", "--tree"),
+                run("--cp", cp, "--scan", "--target", "sample.cars.ICar", "--include", "sample",
+                        "--acquirer", "sample.cars.CarAcquirer#acquire", "--acquire-annotation", "sample.cars.AcquireCar"),
+                run("--cp", cp, "--scan", "--target", "sample.cars.ICar", "--include", "sample",
+                        "--acquirer", "sample.cars.CarAcquirer#acquire", "--format", "json"),
                 run("--bogus"),
                 run("--help"));
         for (Run r : runs) {

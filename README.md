@@ -55,6 +55,7 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--fail-on-missing` | Karşılaştırmada kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
 | `--event-class`, `--event-dispatcher`, `--event-observer` | Event takibi (bkz. aşağıda). Üçü birlikte verilir. |
 | `--event-handle-method <ad>` | Observer'ın event'i alan metodu (varsayılan `handle`). |
+| `--scan` | `--entry` yerine: acquire eden tüm metotları bulup her birini analiz eder (bkz. aşağıda). |
 | `--config <dosya>` | Seçenekleri bir ayar dosyasından oku (bkz. aşağıda). |
 | `--tree` | Gezilen çağrı ağacını da yazdır. |
 | `--format text\|json\|html` | Çıktı biçimi. JSON, CI kontrolleri ya da başka araçlarla işlemek için; HTML, tarayıcıda gezilebilen rapor (bkz. aşağıda). |
@@ -240,6 +241,45 @@ Notlar:
 - Yalnızca giriş metodunun (`--entry`) kendi anotasyonuna bakılır; sınıf üzerindeki ya da akışta daha derindeki
   metotlardaki anotasyonlar dikkate alınmaz.
 - Anotasyonda `ICar`'ı uygulamayan bir sınıf verilmişse yanında `(hedef tipi uygulamiyor!)` yazar.
+
+## Toplu tarama (`--scan`)
+
+Tek tek `--entry` vermek yerine, sınıf yolunda `CarAcquirer.acquire(...)` çağıran **ya da** `@AcquireCar`
+anotasyonunu taşıyan tüm metotları bulup her birini ayrı bir giriş metodu olarak analiz eder:
+
+```bat
+java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --cp uygulamam.jar --scan --target com.example.ICar --acquirer "com.example.CarAcquirer#acquire" --acquire-annotation com.example.AcquireCar --include com.example --format html -o tarama.html --open
+```
+
+- `--include com.example` hem taranacak metotları kendi kodunuzla sınırlar hem de analizi hızlandırır
+  (kütüphanelerin içine girilmez); büyük uygulamalarda mutlaka verin.
+- Bir lambda içindeki `acquire` çağrısı (`template.execute(() -> CarAcquirer.acquire(...))`), lambdayı tanımlayan
+  metoda aittir: o metot taranır ve çağrı o metodun kendi çağrısı sayılır.
+- Diğer tüm seçenekler (event takibi, `--max-depth`, `--direct-only`, ...) her metodun analizine aynen uygulanır.
+- `--fail-on-missing` ile herhangi bir metotta kesin eksik varsa çıkış kodu `3` olur.
+
+Metin çıktısı önce bir durum tablosu verir, ardından sorunlu her metodun acquire karşılaştırmasını yazar:
+
+```
+=== Toplu acquire taramasi: com.example.CarAcquirer#acquire, @com.example.AcquireCar ===
+Taranan metot : 15  (acquire cagrisi: 13, @AcquireCar: 3)
+Sonuc         : 4 metotta kesin eksik, 2 metotta yalnizca olasi eksik, 9 metot OK
+
+   #  Durum  Kesin eksik            Olasi eksik/belirsiz   Kullanilmayan      Metot
+   9  [X]    TowTruck               -                      -                  com.example.RentalService#rent()  [acquire]
+  10  [X]    Tesla                  -                      -                  com.example.RentalService#rentAnnotated()  [anotasyon]
+  12  [?]    -                      Tesla,TowTruck         -                  com.example.RentalService#rentOnlyBmw()  [acquire]
+  13  [OK]   -                      -                      Tesla              com.example.RentalService#rentTooMuch()  [acquire]
+  ...
+```
+
+`--format html -o tarama.html` bir özet sayfası (`tarama.html`: durum kartları, aranabilir/filtrelenebilir tablo) ve
+yanındaki `tarama_metotlar/` klasöründe her metot için tam bir rapor üretir; tablodaki metot adına tıklayınca o
+metodun raporu (çağrı ağacı, bulgular, acquire) açılır, oradan "← Tüm metotlar" ile geri dönülür. JSON çıktısında her
+metodun durumu ve tam acquire karşılaştırması bulunur.
+
+Bir `acquire` çağrısına verilen liste metodun parametresiyse ve akışta onu dolduran bir çağıran yoksa (ör. yardımcı
+bir `acquireAll(List<ICar> cars)` metodu), liste içeriği bilinemez; raporda `?` eleman olarak görünür.
 
 ## Event takibi (`--event-*`)
 

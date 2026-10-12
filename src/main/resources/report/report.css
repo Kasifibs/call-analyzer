@@ -1,0 +1,91 @@
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --border: #e3e6eb;
+    --accent: #2f5bd3; --accent-bg: #e9efff;
+    --hit: #c2371f; --hit-bg: #fdecea; --warn: #a15c00; --warn-bg: #fff4e0;
+    --ok: #1d7a46; --ok-bg: #e6f5ec; --event: #6b3fb8; --event-bg: #f0e9fc;
+    --neutral-bg: #eef0f3; --row-hover: #f2f5fb; --flash: #fff3b0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161b; --panel: #1c1f26; --text: #e4e7ec; --muted: #98a2b3; --border: #2e333d;
+      --accent: #7ea2ff; --accent-bg: #23304f;
+      --hit: #ff8a73; --hit-bg: #3a1f1b; --warn: #f4b55a; --warn-bg: #3a2c14;
+      --ok: #6fd39a; --ok-bg: #18311f; --event: #c5a4ff; --event-bg: #2b2140;
+      --neutral-bg: #262a33; --row-hover: #232835; --flash: #4a4320;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+  header { padding: 16px 24px 8px; }
+  header h1 { margin: 0 0 4px; font-size: 20px; }
+  header .sub { color: var(--muted); }
+  nav { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  nav button { background: none; border: none; padding: 10px 14px; cursor: pointer; color: var(--muted);
+               font: inherit; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  nav .count { background: var(--neutral-bg); border-radius: 10px; padding: 0 7px; margin-left: 4px; font-size: 12px; }
+  nav .count.bad { background: var(--hit-bg); color: var(--hit); }
+  main { padding: 16px 24px 48px; }
+  section { display: none; }
+  section.active { display: block; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+           margin-bottom: 14px; }
+  .panel h2 { margin: 0 0 10px; font-size: 15px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .card .v { font-size: 26px; font-weight: 600; }
+  .card .k { color: var(--muted); font-size: 12px; }
+  .card.bad .v { color: var(--hit); } .card.warn .v { color: var(--warn); } .card.good .v { color: var(--ok); }
+  .muted { color: var(--muted); }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar input[type=search] { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+           background: var(--panel); color: var(--text); font: inherit; min-width: 260px; }
+  .toolbar label { color: var(--muted); user-select: none; }
+  button.btn { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+           color: var(--text); cursor: pointer; font: inherit; }
+  button.btn:hover { border-color: var(--accent); color: var(--accent); }
+  button.link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
+  button.link:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr.f-row { cursor: pointer; }
+  tr.f-row:hover { background: var(--row-hover); }
+  tr.f-row.open { background: var(--accent-bg); }
+  tr.detail td { background: var(--row-hover); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 10px; font-size: 12px; margin: 1px 2px 1px 0;
+           background: var(--neutral-bg); color: var(--muted); white-space: nowrap; }
+  .badge.hit { background: var(--hit-bg); color: var(--hit); } .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); } .badge.event { background: var(--event-bg); color: var(--event); }
+  .badge.acc { background: var(--accent-bg); color: var(--accent); }
+  ol.chain { margin: 6px 0; padding-left: 22px; }
+  ol.chain li { margin: 3px 0; }
+  .tree .node > .children { margin-left: 20px; border-left: 1px dashed var(--border); padding-left: 6px; display: none; }
+  .tree .node.open > .children { display: block; }
+  .tree .row { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; border-radius: 4px; flex-wrap: wrap; }
+  .tree .row:hover { background: var(--row-hover); }
+  .tree .tg { width: 14px; display: inline-block; color: var(--muted); cursor: pointer; user-select: none; text-align: center; }
+  .tree .row.leaf .tg { cursor: default; }
+  .tree .lbl { cursor: pointer; }
+  .tree .row.hit .lbl { color: var(--hit); font-weight: 600; }
+  .tree .row.target .lbl { color: var(--accent); }
+  .tree .row.dim { opacity: .55; }
+  .tree .loc { color: var(--muted); font-size: 12px; }
+  .flash { background: var(--flash) !important; }
+  .cat { border-left: 4px solid var(--border); }
+  .cat.bad { border-left-color: var(--hit); } .cat.warn { border-left-color: var(--warn); }
+  .cat.ok { border-left-color: var(--ok); } .cat.info { border-left-color: var(--accent); }
+  .usage { margin: 8px 0 12px; }
+  .usage .cls { font-weight: 600; }
+  .usage ul { margin: 4px 0; padding-left: 20px; }
+  .grid2 { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+  .warnings li { color: var(--warn); }
+  @media (max-width: 640px) { header, nav, main { padding-left: 12px; padding-right: 12px; }
+    .toolbar input[type=search] { min-width: 0; width: 100%; } }
+  #back { text-decoration: none; font-size: 13px; }
+  #back:hover { color: var(--accent); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  a.mono { color: var(--text); text-decoration: none; }
+  a.mono:hover { color: var(--accent); text-decoration: underline; }

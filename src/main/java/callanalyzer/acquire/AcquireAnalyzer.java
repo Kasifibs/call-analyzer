@@ -12,6 +12,7 @@ import callanalyzer.dataflow.MethodDataFlow;
 import callanalyzer.dataflow.TrackedValue;
 import callanalyzer.dataflow.ValueResolver;
 import callanalyzer.dataflow.ValueResolver.Resolved;
+import callanalyzer.dataflow.ValueSource;
 import callanalyzer.model.CallSite;
 import callanalyzer.model.ClassInfo;
 import callanalyzer.model.InvokeKind;
@@ -64,12 +65,18 @@ public final class AcquireAnalyzer {
      */
     public AcquireAnalyzer(AnalysisResult result, Map<String, byte[]> classBytes, String acquirerSpec,
                            String annotationType) {
+        this(result, new BytecodeRepository(classBytes), acquirerSpec, annotationType);
+    }
+
+    /** Same, sharing already parsed classes (used when many entry methods are analysed in a row). */
+    public AcquireAnalyzer(AnalysisResult result, BytecodeRepository repo, String acquirerSpec,
+                           String annotationType) {
         if (acquirerSpec == null && annotationType == null) {
             throw new IllegalArgumentException("Acquire metodu ya da anotasyonu verilmeli.");
         }
         this.result = result;
         this.hierarchy = result.hierarchy();
-        this.repo = new BytecodeRepository(classBytes);
+        this.repo = repo;
         if (acquirerSpec != null) {
             this.acquirerSpec = MethodSpec.parse(acquirerSpec);
             if (this.acquirerSpec.methodName() == null) {
@@ -103,7 +110,7 @@ public final class AcquireAnalyzer {
 
         // Like the annotation, only the entry method's own acquire calls count: an acquire made somewhere deeper in the
         // flow (a helper, an event observer, ...) must not hide classes the entry method itself failed to acquire.
-        Set<MethodRef> entries = new HashSet<>(result.entries());
+        Set<MethodRef> entries = ownBodies(hierarchy, result.entries());
         List<AcquireCall> otherCalls = calls.stream().filter(c -> !entries.contains(c.caller())).toList();
         calls.removeIf(c -> !entries.contains(c.caller()));
 
@@ -195,11 +202,38 @@ public final class AcquireAnalyzer {
     // ----------------------------------------------------------------------------------------- finding acquirers
 
     private boolean isAcquirerCall(CallSite site, List<DispatchTarget> targets) {
-        if (acquirerSpec == null || !acquirerSpec.matchesSignature(site.target())) {
+        return acquirerSpec != null && isAcquirerCall(hierarchy, acquirerSpec, acquirerClass, site, targets);
+    }
+
+    /** Whether {@code site} calls the acquirer method ({@code acquirerClass} is its resolved internal name). */
+    public static boolean isAcquirerCall(ClassHierarchy hierarchy, MethodSpec acquirer, String acquirerClass,
+                                         CallSite site, List<DispatchTarget> targets) {
+        if (!acquirer.matchesSignature(site.target())) {
             return false;
         }
         return hierarchy.isSubtypeOf(site.target().owner(), acquirerClass)
                 || targets.stream().anyMatch(t -> hierarchy.isSubtypeOf(t.method().owner(), acquirerClass));
+    }
+
+    /**
+     * The entry methods plus the lambda bodies defined in them (also nested ones): code in
+     * {@code template.execute(() -> CarAcquirer.acquire(...))} belongs to the entry method.
+     */
+    public static Set<MethodRef> ownBodies(ClassHierarchy hierarchy, java.util.Collection<MethodRef> entries) {
+        Set<MethodRef> own = new HashSet<>();
+        java.util.Deque<MethodRef> work = new java.util.ArrayDeque<>(entries);
+        while (!work.isEmpty()) {
+            MethodRef m = work.poll();
+            if (!own.add(m)) {
+                continue;
+            }
+            hierarchy.method(m).ifPresent(info -> info.calls().stream()
+                    .filter(CallSite::viaLambda)
+                    .map(CallSite::target)
+                    .filter(t -> t.owner().equals(m.owner()) && t.name().startsWith("lambda$"))
+                    .forEach(work::add));
+        }
+        return own;
     }
 
     private List<AcquireCall> acquireCallsIn(MethodDataFlow flow) {
@@ -215,7 +249,13 @@ public final class AcquireAnalyzer {
             }
             Set<AcquiredCar> cars = new LinkedHashSet<>();
             for (TrackedValue arg : flow.arguments(m)) {
-                cars.addAll(resolveCars(flow, arg));
+                Set<AcquiredCar> found = resolveCars(flow, arg);
+                if (found.isEmpty() && arg.sources().stream().anyMatch(src -> src instanceof ValueSource.Parameter)) {
+                    // acquire(cars) where the list is a parameter nobody in the flow passes: contents unknown
+                    found = Set.of(new AcquiredCar(null, result.targets().get(0), flow.method().toShortString()
+                            + " metoduna disaridan gelen liste (icerigi bilinmiyor)"));
+                }
+                cars.addAll(found);
             }
             calls.add(new AcquireCall(flow.method(), flow.sourceFile(), flow.lineOf(insn), called, List.copyOf(cars)));
         }

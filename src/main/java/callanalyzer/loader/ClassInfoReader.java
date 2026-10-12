@@ -5,6 +5,7 @@ import callanalyzer.model.ClassInfo;
 import callanalyzer.model.InvokeKind;
 import callanalyzer.model.MethodInfo;
 import callanalyzer.model.MethodRef;
+import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.Handle;
@@ -63,8 +64,9 @@ public final class ClassInfoReader {
                                          String[] exceptions) {
             MethodRef ref = new MethodRef(name, methodName, descriptor);
             List<CallSite> calls = new ArrayList<>();
-            methods.put(ref.key(), new MethodInfo(ref, access, calls));
-            return new CallCollector(calls);
+            List<String> annotations = new ArrayList<>();
+            methods.put(ref.key(), new MethodInfo(ref, access, calls, annotations));
+            return new CallCollector(calls, annotations);
         }
 
         ClassInfo toClassInfo() {
@@ -74,11 +76,19 @@ public final class ClassInfoReader {
 
     private static final class CallCollector extends MethodVisitor {
         private final List<CallSite> calls;
+        private final List<String> annotations;
         private int currentLine = -1;
 
-        CallCollector(List<CallSite> calls) {
+        CallCollector(List<CallSite> calls, List<String> annotations) {
             super(ASM_API);
             this.calls = calls;
+            this.annotations = annotations;
+        }
+
+        @Override
+        public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+            annotations.add(descriptor);
+            return null;
         }
 
         @Override

@@ -12,6 +12,12 @@ import callanalyzer.report.AcquireReport;
 import callanalyzer.report.CallTreePrinter;
 import callanalyzer.report.EventReport;
 import callanalyzer.report.HtmlReport;
+import callanalyzer.report.HtmlScanReport;
+import callanalyzer.report.ScanReport;
+import callanalyzer.scan.AcquireScanner;
+import callanalyzer.scan.Candidate;
+import callanalyzer.scan.ScanItem;
+import callanalyzer.scan.ScanResult;
 import callanalyzer.report.JsonReport;
 import callanalyzer.report.TextReport;
 
@@ -82,6 +88,13 @@ public final class Main {
               --format text|json|html    Cikti bicimi (varsayilan: text). html: tarayicida acilan, agaci ve
                                          zincirleri tiklayarak gezebileceginiz tek dosyalik rapor (-o ile).
               --open                     Raporu yazdiktan sonra varsayilan tarayicida/uygulamada ac.
+
+            Toplu tarama:
+              --scan                     --entry yerine: sinif yolunda --acquirer metodunu cagiran ya da
+                                         --acquire-annotation anotasyonunu tasiyan TUM metotlari bulur ve her birini
+                                         ayri giris metodu olarak analiz eder. --include verilirse yalnizca o
+                                         paketlerdeki metotlar taranir. Cikti: ozet tablo + her metodun acquire
+                                         karsilastirmasi; html'de ozet sayfasi + her metot icin ayri sayfa.
               --output, -o <dosya>       Ciktiyi dosyaya yaz.
               --help, -h                 Bu yardimi goster.
             """;
@@ -109,6 +122,7 @@ public final class Main {
         String eventHandle = null;
         String format = "text";
         boolean openAfter = false;
+        boolean scan = false;
         Path output = null;
         try {
             args = expandConfig(args);
@@ -143,11 +157,22 @@ public final class Main {
                     case "--event-handle-method" -> eventHandle = value(args, ++i, a);
                     case "--format" -> format = value(args, ++i, a);
                     case "--open" -> openAfter = true;
+                    case "--scan" -> scan = true;
                     case "--output", "-o" -> output = Path.of(value(args, ++i, a));
                     default -> throw new IllegalArgumentException("Bilinmeyen arguman: " + a);
                 }
             }
-            if (classPath.isEmpty() || options.entries().isEmpty() || options.targets().isEmpty()) {
+            if (scan) {
+                if (!options.entries().isEmpty()) {
+                    throw new IllegalArgumentException("--scan ile --entry birlikte kullanilamaz.");
+                }
+                if (acquirer == null && acquireAnnotation == null) {
+                    throw new IllegalArgumentException("--scan icin --acquirer ve/veya --acquire-annotation gerekli.");
+                }
+                if (classPath.isEmpty() || options.targets().isEmpty()) {
+                    throw new IllegalArgumentException("--cp ve --target zorunludur.");
+                }
+            } else if (classPath.isEmpty() || options.entries().isEmpty() || options.targets().isEmpty()) {
                 throw new IllegalArgumentException("--cp, --entry ve --target zorunludur.");
             }
             if (eventClass != null || eventDispatcher != null || eventObserver != null) {
@@ -171,6 +196,10 @@ public final class Main {
                 return 1;
             }
             ClassHierarchy hierarchy = new ClassHierarchy(loader.classes());
+            if (scan) {
+                return runScan(loader, hierarchy, options, acquirer, acquireAnnotation, format, output, openAfter,
+                        failOnMissing, stdout, stderr);
+            }
             AnalysisResult result = new CallGraphAnalyzer(hierarchy, options, loader.classBytes()).analyze();
             AcquireComparison acquire = acquirer == null && acquireAnnotation == null
                     ? null
@@ -251,6 +280,49 @@ public final class Main {
      * Replaces {@code --config <file>} with the options in the file. Each line is {@code option=value} (comments
      * start with {@code #}); backslashes are kept as they are, so Windows paths can be written directly.
      */
+    private static int runScan(ClassPathLoader loader, ClassHierarchy hierarchy, AnalysisOptions options,
+                               String acquirer, String annotation, String format, Path output, boolean openAfter,
+                               boolean failOnMissing, PrintStream stdout, PrintStream stderr) throws IOException {
+        if (format.equals("html") && output == null) {
+            stderr.println("Hata: --scan --format html icin -o rapor.html gerekli (metot sayfalari yanindaki klasore yazilir).");
+            return 2;
+        }
+        AcquireScanner scanner = new AcquireScanner(hierarchy, loader.classBytes(), options, acquirer, annotation);
+        List<Candidate> candidates = scanner.candidates();
+        stderr.println(candidates.size() + " metot bulundu, analiz ediliyor...");
+        HtmlScanReport html = format.equals("html") ? new HtmlScanReport(output) : null;
+        ScanResult result = scanner.run(candidates, stderr::println, (item, analysis) -> {
+            if (html != null) {
+                html.writeMethodPage(item, analysis);
+            }
+        });
+        if (html != null) {
+            html.writeIndex(result);
+            stderr.println("Ozet: " + output + "  (metot sayfalari: " + html.pagesDir() + ")");
+        } else {
+            PrintWriter out = output == null
+                    ? new PrintWriter(new OutputStreamWriter(stdout, StandardCharsets.UTF_8))
+                    : new PrintWriter(Files.newBufferedWriter(output, StandardCharsets.UTF_8));
+            try {
+                if (format.equals("json")) {
+                    ScanReport.writeJson(result, out);
+                } else {
+                    ScanReport.writeText(result, out);
+                }
+            } finally {
+                out.flush();
+                if (output != null) out.close();
+            }
+            if (output != null) {
+                stderr.println("Rapor yazildi: " + output);
+            }
+        }
+        if (openAfter && output != null) {
+            openInDesktop(output, stderr);
+        }
+        return failOnMissing && result.count(ScanItem.Status.MISSING) > 0 ? 3 : 0;
+    }
+
     private static void openInDesktop(Path file, PrintStream stderr) {
         try {
             if (java.awt.Desktop.isDesktopSupported()

@@ -52,4 +52,9 @@ public class AcquirePatterns {
     public void viaCopy() {
         CarAcquirer.acquire(new ArrayList<>(List.of(bmw)));
     }
+
+    public void viaLambda() {
+        Runnable inTransaction = () -> CarAcquirer.acquire(List.of(bmw));
+        inTransaction.run();
+    }
 }

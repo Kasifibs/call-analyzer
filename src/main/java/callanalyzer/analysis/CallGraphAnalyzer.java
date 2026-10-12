@@ -47,9 +47,19 @@ public final class CallGraphAnalyzer {
     private final ClassHierarchy hierarchy;
     private final AnalysisOptions options;
     private final Map<String, byte[]> classBytes;
+    private EventRouter sharedRouter;
 
     public CallGraphAnalyzer(ClassHierarchy hierarchy, AnalysisOptions options) {
         this(hierarchy, options, null);
+    }
+
+    /**
+     * Reuses an already built event router (its registration table and parsed classes) instead of building one per
+     * analysis; used when many entry methods are analysed in a row.
+     */
+    public CallGraphAnalyzer withEventRouter(EventRouter router) {
+        this.sharedRouter = router;
+        return this;
     }
 
     /** @param classBytes raw class files, needed for event routing ({@link AnalysisOptions#events}) */
@@ -97,13 +107,16 @@ public final class CallGraphAnalyzer {
         EventRouter router = null;
         CallerLookup callers = null;
         if (options.events() != null) {
-            if (classBytes == null) {
-                throw new IllegalArgumentException("Event takibi icin sinif dosyalari (classBytes) gerekli.");
+            if (sharedRouter != null) {
+                router = sharedRouter;
+            } else {
+                if (classBytes == null) {
+                    throw new IllegalArgumentException("Event takibi icin sinif dosyalari (classBytes) gerekli.");
+                }
+                router = new EventRouter(hierarchy, new BytecodeRepository(classBytes), options.events());
             }
-            BytecodeRepository repo = new BytecodeRepository(classBytes);
-            router = new EventRouter(hierarchy, repo, options.events());
             warnings.addAll(router.warnings());
-            callers = ValueResolver.callersFromEdges(edges, repo);
+            callers = ValueResolver.callersFromEdges(edges, router.repository());
         }
 
         List<Finding> found = new ArrayList<>();
@@ -257,19 +270,6 @@ public final class CallGraphAnalyzer {
     }
 
     private boolean isIncluded(String owner) {
-        for (String ex : options.excludePrefixes()) {
-            if (owner.startsWith(ex)) {
-                return false;
-            }
-        }
-        if (options.includePrefixes().isEmpty()) {
-            return true;
-        }
-        for (String in : options.includePrefixes()) {
-            if (owner.startsWith(in)) {
-                return true;
-            }
-        }
-        return false;
+        return options.isIncluded(owner);
     }
 }

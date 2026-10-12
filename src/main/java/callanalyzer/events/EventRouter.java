@@ -89,6 +89,10 @@ public final class EventRouter {
         return List.copyOf(warnings);
     }
 
+    public BytecodeRepository repository() {
+        return repo;
+    }
+
     public String dispatcherClass() {
         return dispatcherClass;
     }

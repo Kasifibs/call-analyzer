@@ -32,7 +32,7 @@ import java.util.Map;
 /**
  * A single, self-contained HTML page (no external resources) for browsing an analysis: summary, findings with their
  * call chains, a lazily expanded call tree, the acquire comparison and the events. The analysis data is embedded as
- * JSON; the page template is {@code /report/report.html}. The file is pure ASCII, so it displays correctly whatever
+ * JSON; the page template is {@code /report/report.html} (styles in {@code report.css}). The file is pure ASCII, so it displays correctly whatever
  * encoding the browser assumes.
  */
 public final class HtmlReport {
@@ -50,10 +50,24 @@ public final class HtmlReport {
     }
 
     public static void write(AnalysisResult result, AcquireComparison acquire, PrintWriter out) {
-        String template = template();
-        String data = Json.embeddable(new HtmlReport(result).data(acquire));
+        write(result, acquire, null, out);
+    }
+
+    /** @param backLink relative link to an overview page (scan mode), or {@code null} */
+    public static void write(AnalysisResult result, AcquireComparison acquire, String backLink, PrintWriter out) {
+        Map<String, Object> data = new HtmlReport(result).data(acquire);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> meta = (Map<String, Object>) data.get("meta");
+        meta.put("back", backLink);
+        page("report.html", data, out);
+    }
+
+    /** Fills {@code /report/<template>} with the shared stylesheet and the embedded data. */
+    static void page(String templateName, Object data, PrintWriter out) {
+        String template = resource(templateName).replace("/*CSS*/", resource("report.css"));
         int at = template.indexOf("/*DATA*/");
-        out.print(asciiSafe(template.substring(0, at)) + data + asciiSafe(template.substring(at + "/*DATA*/".length())));
+        out.print(asciiSafe(template.substring(0, at)) + Json.embeddable(data)
+                + asciiSafe(template.substring(at + "/*DATA*/".length())));
         out.flush();
     }
 
@@ -258,10 +272,10 @@ public final class HtmlReport {
         }).toList();
     }
 
-    private static String template() {
-        try (InputStream in = HtmlReport.class.getResourceAsStream("/report/report.html")) {
+    private static String resource(String name) {
+        try (InputStream in = HtmlReport.class.getResourceAsStream("/report/" + name)) {
             if (in == null) {
-                throw new IllegalStateException("report/report.html bulunamadi");
+                throw new IllegalStateException("report/" + name + " bulunamadi");
             }
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {

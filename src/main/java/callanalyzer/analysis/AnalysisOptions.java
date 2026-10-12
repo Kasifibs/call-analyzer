@@ -86,6 +86,32 @@ public final class AnalysisOptions {
         return events;
     }
 
+    /** A copy of these options with {@code spec} as the only entry method. */
+    public AnalysisOptions withEntry(String spec) {
+        AnalysisOptions copy = new AnalysisOptions();
+        copy.entries.add(spec);
+        copy.targets.addAll(targets);
+        copy.includePrefixes.addAll(includePrefixes);
+        copy.excludePrefixes.addAll(excludePrefixes);
+        copy.maxDepth = maxDepth;
+        copy.includeConstructors = includeConstructors;
+        copy.onlyInterfaceMethods = onlyInterfaceMethods;
+        copy.skipInternalCalls = skipInternalCalls;
+        copy.directOnly = directOnly;
+        copy.events = events;
+        return copy;
+    }
+
+    /** Whether {@code internalName} passes the include/exclude filters. */
+    public boolean isIncluded(String internalName) {
+        for (String ex : excludePrefixes) {
+            if (internalName.startsWith(ex)) {
+                return false;
+            }
+        }
+        return includePrefixes.isEmpty() || includePrefixes.stream().anyMatch(internalName::startsWith);
+    }
+
     public List<String> entries() {
         return List.copyOf(entries);
     }
