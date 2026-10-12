@@ -1,16 +1,18 @@
-package callanalyzer.acquire;
+package callanalyzer.dataflow;
 
-import callanalyzer.acquire.ValueSource.CallResult;
-import callanalyzer.acquire.ValueSource.FieldValue;
-import callanalyzer.acquire.ValueSource.NewObject;
-import callanalyzer.acquire.ValueSource.Parameter;
-import callanalyzer.acquire.ValueSource.This;
+import callanalyzer.dataflow.ValueSource.CallResult;
+import callanalyzer.dataflow.ValueSource.Constant;
+import callanalyzer.dataflow.ValueSource.FieldValue;
+import callanalyzer.dataflow.ValueSource.NewObject;
+import callanalyzer.dataflow.ValueSource.Parameter;
+import callanalyzer.dataflow.ValueSource.This;
 import callanalyzer.model.MethodRef;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.analysis.AnalyzerException;
@@ -70,6 +72,10 @@ final class SourceTrackingInterpreter extends Interpreter<TrackedValue> {
         return switch (insn.getOpcode()) {
             case Opcodes.NEW -> of(b, new NewObject(instructions.indexOf(insn), ((TypeInsnNode) insn).desc));
             case Opcodes.GETSTATIC -> of(b, field((FieldInsnNode) insn));
+            case Opcodes.LDC -> {
+                Object c = ((LdcInsnNode) insn).cst;
+                yield c instanceof String || c instanceof Type ? of(b, new Constant(c)) : of(b);
+            }
             default -> of(b);
         };
     }

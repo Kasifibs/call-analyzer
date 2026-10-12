@@ -1,5 +1,7 @@
 package callanalyzer.analysis;
 
+import callanalyzer.events.EventDispatch;
+import callanalyzer.events.Registration;
 import callanalyzer.model.MethodRef;
 
 import java.util.List;
@@ -16,10 +18,13 @@ import java.util.Set;
  * @param depths    call depth of every analysed method
  * @param hierarchy the class hierarchy the analysis ran on
  * @param warnings  non-fatal problems (e.g. a target type that is not on the class path)
+ * @param events    event dispatch calls in the flow and the observers they continue into (event routing only)
+ * @param eventRegistrations observer registrations found on the class path (event routing only)
  */
 public record AnalysisResult(List<MethodRef> entries, List<String> targets, List<Finding> findings,
                              Map<MethodRef, List<CallEdge>> edges, Map<MethodRef, Integer> depths,
-                             ClassHierarchy hierarchy, List<String> warnings) {
+                             ClassHierarchy hierarchy, List<String> warnings, List<EventDispatch> events,
+                             List<Registration> eventRegistrations) {
 
     /** Methods whose bodies were analysed. */
     public Set<MethodRef> analysedMethods() {

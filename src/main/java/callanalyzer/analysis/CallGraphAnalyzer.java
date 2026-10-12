@@ -1,6 +1,11 @@
 package callanalyzer.analysis;
 
 import callanalyzer.analysis.ClassHierarchy.DispatchTarget;
+import callanalyzer.dataflow.BytecodeRepository;
+import callanalyzer.dataflow.ValueResolver;
+import callanalyzer.dataflow.ValueResolver.CallerLookup;
+import callanalyzer.events.EventDispatch;
+import callanalyzer.events.EventRouter;
 import callanalyzer.model.CallSite;
 import callanalyzer.model.ClassInfo;
 import callanalyzer.model.InvokeKind;
@@ -24,20 +29,34 @@ import java.util.Set;
  * (including the implementations of interface/virtual calls, lambdas and method references), and records each
  * call that may reach a class implementing one of the target types.
  *
+ * <p>With an event configuration ({@link AnalysisOptions#events}), event dispatch calls continue only into the
+ * observers registered for the published event (see {@link EventRouter}).
+ *
  * <p>Every method is analysed once, so recursion and cycles terminate; thanks to the breadth-first order, the
  * chain stored for a finding is a shortest path from an entry method.
  */
 public final class CallGraphAnalyzer {
 
-    private record Parent(MethodRef caller, CallSite site) {
+    /** How a method was first reached; {@code via} describes an event hop, otherwise {@code null}. */
+    private record Parent(MethodRef caller, CallSite site, String via) {
     }
+
+    /** Upper bound on re-routing rounds, as a guard against oscillation. */
+    private static final int MAX_EVENT_ROUNDS = 20;
 
     private final ClassHierarchy hierarchy;
     private final AnalysisOptions options;
+    private final Map<String, byte[]> classBytes;
 
     public CallGraphAnalyzer(ClassHierarchy hierarchy, AnalysisOptions options) {
+        this(hierarchy, options, null);
+    }
+
+    /** @param classBytes raw class files, needed for event routing ({@link AnalysisOptions#events}) */
+    public CallGraphAnalyzer(ClassHierarchy hierarchy, AnalysisOptions options, Map<String, byte[]> classBytes) {
         this.hierarchy = hierarchy;
         this.options = options;
+        this.classBytes = classBytes;
     }
 
     public AnalysisResult analyze() {
@@ -75,31 +94,72 @@ public final class CallGraphAnalyzer {
             queue.add(e);
         }
 
+        EventRouter router = null;
+        CallerLookup callers = null;
+        if (options.events() != null) {
+            if (classBytes == null) {
+                throw new IllegalArgumentException("Event takibi icin sinif dosyalari (classBytes) gerekli.");
+            }
+            BytecodeRepository repo = new BytecodeRepository(classBytes);
+            router = new EventRouter(hierarchy, repo, options.events());
+            warnings.addAll(router.warnings());
+            callers = ValueResolver.callersFromEdges(edges, repo);
+        }
+
         List<Finding> found = new ArrayList<>();
-        while (!queue.isEmpty()) {
-            MethodRef current = queue.poll();
-            int depth = depths.get(current);
-            MethodInfo info = hierarchy.method(current).orElseThrow();
-            List<CallEdge> out = new ArrayList<>();
-            for (CallSite site : info.calls()) {
-                List<DispatchTarget> dispatch = hierarchy.dispatch(site);
-                out.add(new CallEdge(current, site, dispatch));
-                for (String target : targets) {
-                    match(current, depth, site, dispatch, target).ifPresent(found::add);
-                }
-                if (options.maxDepth() >= 0 && depth + 1 > options.maxDepth()) {
-                    continue;
-                }
-                for (DispatchTarget t : dispatch) {
-                    MethodRef callee = t.method();
-                    if (!depths.containsKey(callee) && isExpandable(callee)) {
-                        depths.put(callee, depth + 1);
-                        parents.put(callee, new Parent(current, site));
-                        queue.add(callee);
+        Map<List<Object>, EventDispatch> events = new LinkedHashMap<>(); // key: caller, index of the edge
+        for (int round = 0; ; round++) {
+            while (!queue.isEmpty()) {
+                MethodRef current = queue.poll();
+                int depth = depths.get(current);
+                MethodInfo info = hierarchy.method(current).orElseThrow();
+                List<CallEdge> out = new ArrayList<>();
+                edges.put(current, out);
+                for (CallSite site : info.calls()) {
+                    List<DispatchTarget> dispatch;
+                    String via = null;
+                    if (router != null && router.isDispatchCall(site)) {
+                        // Only the observers registered for the published event, not every observer.
+                        EventDispatch ev = router.route(current, site, callers);
+                        events.put(List.of(current, out.size()), ev);
+                        dispatch = ev.observers();
+                        via = ev.label();
+                    } else {
+                        dispatch = hierarchy.dispatch(site);
                     }
+                    out.add(new CallEdge(current, site, dispatch));
+                    for (String target : targets) {
+                        match(current, depth, site, dispatch, target).ifPresent(found::add);
+                    }
+                    enqueue(current, site, dispatch, depth, via, depths, parents, queue);
                 }
             }
-            edges.put(current, Collections.unmodifiableList(out));
+            if (router == null || events.isEmpty() || round >= MAX_EVENT_ROUNDS) {
+                break;
+            }
+            // Methods reached later may have revealed more callers (and so more events) for an earlier dispatch.
+            boolean changed = false;
+            for (Map.Entry<List<Object>, EventDispatch> e : events.entrySet()) {
+                MethodRef caller = (MethodRef) e.getKey().get(0);
+                int index = (Integer) e.getKey().get(1);
+                CallEdge old = edges.get(caller).get(index);
+                EventDispatch ev = router.route(caller, old.site(), callers);
+                if (ev.observers().equals(old.targets())) {
+                    e.setValue(ev);
+                    continue;
+                }
+                changed = true;
+                e.setValue(ev);
+                edges.get(caller).set(index, new CallEdge(caller, old.site(), ev.observers()));
+                found.removeIf(f -> f.caller().equals(caller) && f.site().equals(old.site()));
+                for (String target : targets) {
+                    match(caller, depths.get(caller), old.site(), ev.observers(), target).ifPresent(found::add);
+                }
+                enqueue(caller, old.site(), ev.observers(), depths.get(caller), ev.label(), depths, parents, queue);
+            }
+            if (!changed) {
+                break;
+            }
         }
 
         // Chains are built once the traversal is done, so that they follow the final (shortest) parent links.
@@ -108,9 +168,27 @@ public final class CallGraphAnalyzer {
                         f.matchedTargets(), f.receiverTypeMatches(), f.interfaceMethod(), f.internalCall(),
                         chainTo(f.caller(), parents)))
                 .toList();
+        Map<MethodRef, List<CallEdge>> frozenEdges = new LinkedHashMap<>();
+        edges.forEach((k, v) -> frozenEdges.put(k, List.copyOf(v)));
         return new AnalysisResult(List.copyOf(entries), List.copyOf(targets), findings,
-                Collections.unmodifiableMap(edges), Collections.unmodifiableMap(depths), hierarchy,
-                List.copyOf(warnings));
+                Collections.unmodifiableMap(frozenEdges), Collections.unmodifiableMap(depths), hierarchy,
+                List.copyOf(warnings), List.copyOf(events.values()),
+                router == null ? List.of() : router.registrations());
+    }
+
+    private void enqueue(MethodRef caller, CallSite site, List<DispatchTarget> dispatch, int depth, String via,
+                         Map<MethodRef, Integer> depths, Map<MethodRef, Parent> parents, Deque<MethodRef> queue) {
+        if (options.maxDepth() >= 0 && depth + 1 > options.maxDepth()) {
+            return;
+        }
+        for (DispatchTarget t : dispatch) {
+            MethodRef callee = t.method();
+            if (!depths.containsKey(callee) && isExpandable(callee)) {
+                depths.put(callee, depth + 1);
+                parents.put(callee, new Parent(caller, site, via));
+                queue.add(callee);
+            }
+        }
     }
 
     /**
@@ -161,11 +239,11 @@ public final class CallGraphAnalyzer {
         MethodRef current = method;
         Parent p = parents.get(current);
         while (p != null) {
-            chain.add(new ChainStep(current, p.site().line()));
+            chain.add(new ChainStep(current, p.site().line(), p.via()));
             current = p.caller();
             p = parents.get(current);
         }
-        chain.add(new ChainStep(current, -1));
+        chain.add(new ChainStep(current, -1, null));
         Collections.reverse(chain);
         return List.copyOf(chain);
     }

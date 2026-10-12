@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.PrintStream;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -82,6 +83,48 @@ class MainTest {
         assertTrue(r.out().contains("[X] EKSIK"));
     }
 
+    @Test
+    void optionsFromConfigFile(@TempDir Path dir) throws Exception {
+        Path config = dir.resolve("analyzer.properties");
+        Files.writeString(config, String.join("\n",
+                "# event ayarlari",
+                "cp=" + Fixtures.sampleClassesDir(),
+                "target=sample.cars.ICar",
+                "event-class=sample.events.Event",
+                "event-dispatcher=sample.events.EventDispatcher",
+                "--event-observer = sample.events.IObserver",
+                "tree=true",
+                "direct-only=false"));
+        Run r = run("--config", config.toString(), "--entry", "sample.events.EventFlowService#rent");
+        assertEquals(0, r.exit(), r.err());
+        assertTrue(r.out().contains("=== Event akisi ==="));
+        assertTrue(r.out().contains("[event CAR_RENTED] CarRentedObserver#handle(CarRentedEvent)"));
+        assertTrue(r.out().contains("=== Cagri agaci"));
+
+        Files.writeString(config, "cp=C:\\apps\\lib\\a.jar,C:\\apps\\b.jar\nentry=a.B#c\n");
+        assertEquals(List.of("--cp", "C:\\apps\\lib\\a.jar", "--cp", "C:\\apps\\b.jar", "--entry", "a.B#c", "--tree"),
+                List.of(Main.expandConfig(new String[]{"--config", config.toString(), "--tree"})));
+    }
+
+    @Test
+    void classPathWildcardIsExpandedWithoutCreatingAPathWithStar(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("b.jar"), "");
+        Files.writeString(dir.resolve("a.jar"), "");
+        Files.writeString(dir.resolve("notes.txt"), "");
+        Method m = Main.class.getDeclaredMethod("classPathEntry", String.class);
+        m.setAccessible(true);
+        assertEquals(List.of(dir.resolve("a.jar"), dir.resolve("b.jar")), m.invoke(null, dir + File.separator + "*"));
+        assertEquals(List.of(dir.resolve("a.jar"), dir.resolve("b.jar")), m.invoke(null, dir + "/*"));
+    }
+
+    @Test
+    void eventOptionsMustBeGivenTogether() throws Exception {
+        Run r = run("--cp", Fixtures.sampleClassesDir().toString(), "--entry", "sample.events.EventFlowService#rent",
+                "--target", "sample.cars.ICar", "--event-class", "sample.events.Event");
+        assertEquals(2, r.exit());
+        assertTrue(r.err().contains("--event-dispatcher"));
+    }
+
     private static String[] concat(String[] a, String... b) {
         String[] r = java.util.Arrays.copyOf(a, a.length + b.length);
         System.arraycopy(b, 0, r, a.length, b.length);
@@ -109,6 +152,9 @@ class MainTest {
                         "sample.cars.ICar", "--acquire-annotation", "sample.cars.LegacyAcquireCar"),
                 run("--cp", cp, "--entry", "sample.cars.Garage#nope", "--target", "sample.cars.Nope"),
                 run("--cp", "does-not-exist", "--entry", "a.B#c", "--target", "a.I"),
+                run("--cp", cp, "--entry", "sample.events.EventFlowService", "--target", "sample.cars.ICar",
+                        "--event-class", "sample.events.Event", "--event-dispatcher", "sample.events.EventDispatcher",
+                        "--event-observer", "sample.events.IObserver", "--tree"),
                 run("--bogus"),
                 run("--help"));
         for (Run r : runs) {

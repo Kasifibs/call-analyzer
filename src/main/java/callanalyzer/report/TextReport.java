@@ -86,6 +86,9 @@ public final class TextReport {
                 ClassInfo prevClass = h.get(prev.owner());
                 sb.append(location(prevClass == null ? null : prevClass.sourceFile(), step.callLine())).append(' ');
             }
+            if (step.via() != null) {
+                sb.append('[').append(step.via()).append("] ");
+            }
             sb.append(step.method().toShortString());
         }
         return sb.toString();

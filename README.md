@@ -53,6 +53,9 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--acquirer <metot>` | Ör. `com.example.CarAcquirer#acquire`. Akışta bu metoda verilen listedeki `ICar` nesnelerini bulur ve akışta kullanılan sınıflarla karşılaştırır (bkz. aşağıda). |
 | `--acquire-annotation <tip>` | Ör. `com.example.AcquireCar`. Analiz edilen (giriş) metotta bu anotasyon var mı bakar, içinde verilen sınıfları listeler ve karşılaştırmaya ekler. `--acquirer` ile birlikte kullanılabilir. |
 | `--fail-on-missing` | Karşılaştırmada kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
+| `--event-class`, `--event-dispatcher`, `--event-observer` | Event takibi (bkz. aşağıda). Üçü birlikte verilir. |
+| `--event-handle-method <ad>` | Observer'ın event'i alan metodu (varsayılan `handle`). |
+| `--config <dosya>` | Seçenekleri bir ayar dosyasından oku (bkz. aşağıda). |
 | `--tree` | Gezilen çağrı ağacını da yazdır. |
 | `--format text\|json` | Çıktı biçimi. JSON, CI kontrolleri ya da başka araçlarla işlemek için. |
 | `-o <dosya>` | Çıktıyı dosyaya yaz. |
@@ -208,6 +211,99 @@ Notlar:
 - Yalnızca giriş metodunun (`--entry`) kendi anotasyonuna bakılır; sınıf üzerindeki ya da akışta daha derindeki
   metotlardaki anotasyonlar dikkate alınmaz.
 - Anotasyonda `ICar`'ı uygulamayan bir sınıf verilmişse yanında `(hedef tipi uygulamiyor!)` yazar.
+
+## Event takibi (`--event-*`)
+
+Akış sırasında bir `EventDispatcher` üzerinden event yayınlanıyor ve aynı thread'de observer'lar çalışıyorsa:
+
+```java
+public class CarRentedObserver implements IObserver<CarRentedEvent> {
+    public CarRentedObserver(EventDispatcher dispatcher) {
+        dispatcher.register(CarRentedEvent.NAME, this);      // "CAR_RENTED"
+    }
+    public void handle(CarRentedEvent event) {
+        towTruck.tow(event.getCar());                         // ICar kullanimi
+        dispatcher.dispatch(new CarReturnedEvent());          // inner event
+    }
+}
+```
+
+```bat
+java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --cp uygulamam.jar --entry "com.example.RentalService#rent" --target com.example.ICar --event-class com.example.event.Event --event-dispatcher com.example.event.EventDispatcher --event-observer com.example.event.IObserver
+```
+
+Event ayarı olmadan araç `dispatcher.dispatch(event)` içindeki `observer.handle(event)` çağrısında **tüm**
+`IObserver` uygulamalarına iner. Event ayarıyla:
+
+1. Sınıf yolundaki tüm `register(...)` çağrıları taranır ve hangi event adına hangi observer'ın kayıtlı olduğu
+   çıkarılır (`dispatcher.register("CAR_RENTED", this)`; ad bir sabit ya da `static final` alan olabilir; kayıt
+   kurucuda ya da `init`/`@PostConstruct` gibi bir metotta yapılabilir; `unregister`/`remove...` sayılmaz).
+2. Akışta bir `dispatch(event)` görüldüğünde event'in sınıfı ve adı bulunur:
+   - `super("CAR_RENTED")` / `super(NAME)` ile kurucuda verilen ad,
+   - `new NamedEvent("CAR_RETURNED")` gibi oluşturulduğu yerde verilen ad,
+   - sabit dönen bir `getName()` override'ı,
+   - event bir yardımcı metoda parametre olarak geçiyorsa (`publish(Event e)`), akıştaki çağıranları.
+3. Akış yalnızca o ada kayıtlı observer'ların `handle` metoduna devam eder (generic `IObserver<T>` için derleyicinin
+   ürettiği köprü metot değil, `handle(CarRentedEvent)` seçilir). Observer'ın içinde yayınlanan event'ler (inner
+   event) de aynı şekilde takip edilir.
+
+Ad bulunamazsa (ör. çalışma anında hesaplanıyorsa) `handle` parametre tipi event sınıfını kabul eden observer'lara,
+event hakkında hiçbir şey bilinmiyorsa (ör. giriş metodunun parametresi) tüm observer'lara gidilir; raporda bu
+"Secim" satırında belirtilir.
+
+Çıktıda bulguların zincirinde event geçişleri görünür, ayrıca bir event bölümü eklenir:
+
+```
+[4] Tesla#charge()  ->  Tesla
+    Yer     : sample.events.CarReturnedObserver#handle(sample.events.CarReturnedEvent)  (CarReturnedObserver.java:15)  [derinlik 2, VIRTUAL]
+    Zincir  : EventFlowService#rent()
+              `- (EventFlowService.java:11) [event CAR_RENTED] CarRentedObserver#handle(CarRentedEvent)
+                 `- (CarRentedObserver.java:18) [event CAR_RETURNED] CarReturnedObserver#handle(CarReturnedEvent)
+
+=== Event akisi ===
+Kayitli observer'lar (5 kayit):
+    AUDIT                    -> AuditObserver
+    CAR_RENTED               -> CarRentedObserver, KafkaCarRentedObserver
+    CAR_RETURNED             -> CarReturnedObserver
+    PAYMENT_DONE             -> PaymentObserver
+
+[E1] EventFlowService#rent()  (EventFlowService.java:11)  EventDispatcher#dispatch(Event)
+     Event      : CarRentedEvent   ad: "CAR_RENTED"
+     Secim      : event adina kayitli observer'lar
+     Observer'lar: CarRentedObserver#handle(CarRentedEvent), KafkaCarRentedObserver#handle(CarRentedEvent)
+
+[E2] CarRentedObserver#handle(CarRentedEvent)  (CarRentedObserver.java:18)  EventDispatcher#dispatch(Event)
+     Event      : CarReturnedEvent   ad: "CAR_RETURNED"
+     Secim      : event adina kayitli observer'lar
+     Observer'lar: CarReturnedObserver#handle(CarReturnedEvent)
+```
+
+Kafka'ya event basan observer'lar da analiz edilir (o ana kadar aynı thread'de çalışırlar); Kafka'nın öbür
+tarafındaki tüketiciler ayrı bir akıştır ve takip edilmez. Event sınıfları `--include` filtresi dışında kalsa bile
+event adlarını bulmak için okunur.
+
+## Ayar dosyası (`--config`)
+
+Seçenekleri her seferinde yazmamak için bir dosyaya koyabilirsiniz (örnek: `ornek-ayar.properties`):
+
+```properties
+cp=uygulamam.jar
+target=com.example.ICar
+acquirer=com.example.CarAcquirer#acquire
+event-class=com.example.event.Event
+event-dispatcher=com.example.event.EventDispatcher
+event-observer=com.example.event.IObserver
+tree=true
+```
+
+```bat
+java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --config ayar.properties --entry "com.example.RentalService#rent"
+```
+
+Her satır `seçenek=değer` biçimindedir (başta `--` olmadan, `#` ile yorum). Tekrarlanabilen seçenekler (`cp`,
+`entry`, `target`, `include`, `exclude`) virgülle ayrılabilir; bayraklar `true`/`false` alır. Windows yolları ters
+bölüyle olduğu gibi yazılabilir. Komut satırında verilen seçenekler dosyadakilere eklenir (tek değerli olanlarda
+komut satırı geçerlidir).
 
 ## Programatik kullanım
 

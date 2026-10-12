@@ -1,9 +1,9 @@
-package callanalyzer.acquire;
+package callanalyzer.dataflow;
 
 import callanalyzer.model.MethodRef;
 
 /** Where a value on the operand stack or in a local variable may have come from. */
-sealed interface ValueSource {
+public sealed interface ValueSource {
 
     /** {@code new T()} or {@code new T[n]} at instruction {@code insn}. */
     record NewObject(int insn, String type) implements ValueSource {
@@ -23,5 +23,9 @@ sealed interface ValueSource {
 
     /** {@code this}. */
     record This() implements ValueSource {
+    }
+
+    /** A constant loaded with {@code LDC}: a {@link String} or a class literal ({@link org.objectweb.asm.Type}). */
+    record Constant(Object value) implements ValueSource {
     }
 }

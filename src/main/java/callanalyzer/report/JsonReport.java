@@ -27,6 +27,9 @@ public final class JsonReport {
         root.put("analysedMethods", result.analysedMethods().size());
         root.put("warnings", result.warnings());
         root.put("findings", result.findings().stream().map(JsonReport::finding).toList());
+        if (!result.events().isEmpty() || !result.eventRegistrations().isEmpty()) {
+            root.put("events", EventReport.toJson(result));
+        }
         if (acquire != null) {
             root.put("acquire", AcquireReport.toJson(acquire));
         }
@@ -61,6 +64,7 @@ public final class JsonReport {
                     Map<String, Object> c = new LinkedHashMap<>();
                     c.put("method", s.method().toQualifiedString());
                     c.put("callLine", s.callLine());
+                    c.put("via", s.via());
                     return c;
                 }).toList());
         return m;

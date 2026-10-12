@@ -1,10 +1,5 @@
 package callanalyzer.acquire;
 
-import callanalyzer.acquire.ValueSource.CallResult;
-import callanalyzer.acquire.ValueSource.FieldValue;
-import callanalyzer.acquire.ValueSource.NewObject;
-import callanalyzer.acquire.ValueSource.Parameter;
-import callanalyzer.acquire.ValueSource.This;
 import callanalyzer.analysis.AnalysisResult;
 import callanalyzer.analysis.CallEdge;
 import callanalyzer.analysis.ChainStep;
@@ -12,28 +7,28 @@ import callanalyzer.analysis.ClassHierarchy;
 import callanalyzer.analysis.ClassHierarchy.DispatchTarget;
 import callanalyzer.analysis.Finding;
 import callanalyzer.analysis.MethodSpec;
+import callanalyzer.dataflow.BytecodeRepository;
+import callanalyzer.dataflow.MethodDataFlow;
+import callanalyzer.dataflow.TrackedValue;
+import callanalyzer.dataflow.ValueResolver;
+import callanalyzer.dataflow.ValueResolver.Resolved;
 import callanalyzer.model.CallSite;
 import callanalyzer.model.ClassInfo;
 import callanalyzer.model.InvokeKind;
 import callanalyzer.model.MethodRef;
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -44,28 +39,20 @@ import java.util.TreeSet;
  * on the entry methods (e.g. {@code @AcquireCar(cars = {Opel.class, Mercedes.class})}). The acquired classes are
  * then compared with the implementations the flow actually calls.
  *
- * <p>The list contents are recovered with an intra-procedural data-flow analysis that follows values back to
- * {@code new X()}, fields (by their declared type, e.g. {@code @Autowired Bmw bmw}), method return values,
- * collection factories ({@code List.of}, {@code Arrays.asList}, ...), {@code add}/{@code addAll} calls, arrays,
- * fields holding a list, and parameters (through the callers found in the analysed flow).
+ * <p>The list contents are recovered with {@link ValueResolver}, so fields typed with a concrete class
+ * ({@code @Autowired Bmw bmw}), {@code new X()}, {@code List.of}, {@code add} calls, getters, list fields and
+ * parameters (through the callers found in the analysed flow) are all understood.
  */
 public final class AcquireAnalyzer {
 
-    private static final int MAX_DEPTH = 10;
-    private static final Set<String> MUTATORS = Set.of("<init>", "add", "addAll", "addFirst", "addLast", "push",
-            "offer", "offerFirst", "offerLast", "put", "putIfAbsent", "set");
-
     private final ClassHierarchy hierarchy;
-    private final Map<String, byte[]> classBytes;
+    private final BytecodeRepository repo;
     private final AnalysisResult result;
     private final MethodSpec acquirerSpec;
     private final String acquirerClass;
     private final String annotationType;
 
-    private final Map<String, Optional<ClassNode>> classNodes = new HashMap<>();
-    private final Map<MethodRef, Optional<MethodDataFlow>> flows = new HashMap<>();
-    private final Map<List<Object>, Set<AcquiredCar>> memo = new HashMap<>();
-    private final Set<List<Object>> inProgress = new HashSet<>();
+    private ValueResolver resolver;
 
     public AcquireAnalyzer(AnalysisResult result, Map<String, byte[]> classBytes, String acquirerSpec) {
         this(result, classBytes, acquirerSpec, null);
@@ -82,7 +69,7 @@ public final class AcquireAnalyzer {
         }
         this.result = result;
         this.hierarchy = result.hierarchy();
-        this.classBytes = classBytes;
+        this.repo = new BytecodeRepository(classBytes);
         if (acquirerSpec != null) {
             this.acquirerSpec = MethodSpec.parse(acquirerSpec);
             if (this.acquirerSpec.methodName() == null) {
@@ -110,7 +97,7 @@ public final class AcquireAnalyzer {
                 }
             }
             if (callsAcquirer) {
-                flow(e.getKey()).ifPresent(flow -> calls.addAll(acquireCallsIn(flow)));
+                repo.flow(e.getKey()).ifPresent(flow -> calls.addAll(acquireCallsIn(flow)));
             }
         }
 
@@ -215,13 +202,13 @@ public final class AcquireAnalyzer {
                 continue;
             }
             MethodRef called = new MethodRef(m.owner, m.name, m.desc);
-            CallSite site = new CallSite(kindOf(m), called, -1, false);
+            CallSite site = new CallSite(BytecodeRepository.kindOf(m), called, -1, false);
             if (!isAcquirerCall(site, hierarchy.dispatch(site))) {
                 continue;
             }
             Set<AcquiredCar> cars = new LinkedHashSet<>();
             for (TrackedValue arg : flow.arguments(m)) {
-                cars.addAll(resolveAny(flow, arg, 0));
+                cars.addAll(resolveCars(flow, arg));
             }
             calls.add(new AcquireCall(flow.method(), flow.sourceFile(), flow.lineOf(insn), called, List.copyOf(cars)));
         }
@@ -236,7 +223,7 @@ public final class AcquireAnalyzer {
         String shortName = "@" + simple(annotationType);
         List<AnnotationCheck> checks = new ArrayList<>();
         for (MethodRef entry : result.entries()) {
-            ClassNode owner = classNode(entry.owner()).orElse(null);
+            ClassNode owner = repo.classNode(entry.owner()).orElse(null);
             MethodNode method = owner == null ? null : owner.methods.stream()
                     .filter(m -> m.name.equals(entry.name()) && m.desc.equals(entry.desc()))
                     .findFirst().orElse(null);
@@ -285,291 +272,30 @@ public final class AcquireAnalyzer {
         return -1;
     }
 
-    // ------------------------------------------------------------------------------------- value resolution
-
-    /** Every target-typed object a value may be, or contain (if it is a collection/array). */
-    private Set<AcquiredCar> resolveAny(MethodDataFlow flow, TrackedValue value, int depth) {
-        Set<AcquiredCar> cars = new LinkedHashSet<>();
-        if (value == null || depth > MAX_DEPTH) {
-            return cars;
-        }
-        for (ValueSource src : value.sources()) {
-            List<Object> key = List.of(flow.method(), src);
-            Set<AcquiredCar> cached = memo.get(key);
-            if (cached != null) {
-                cars.addAll(cached);
-                continue;
-            }
-            if (!inProgress.add(key)) {
-                continue; // cycle
-            }
-            Set<AcquiredCar> found = isTargetType(typeOf(flow, src))
-                    ? resolveObject(flow, src, depth)
-                    : resolveContainer(flow, src, depth);
-            inProgress.remove(key);
-            memo.put(key, found);
-            cars.addAll(found);
-        }
-        return cars;
-    }
-
-    /** {@code src} is itself a target-typed object (e.g. an {@code ICar}): find its class. */
-    private Set<AcquiredCar> resolveObject(MethodDataFlow flow, ValueSource src, int depth) {
-        Set<AcquiredCar> cars = new LinkedHashSet<>();
-        if (src instanceof NewObject n) {
-            cars.add(new AcquiredCar(n.type(), n.type(),
-                    "new " + simple(n.type()) + "()" + at(flow, flow.insn(n.insn()))));
-        } else if (src instanceof FieldValue f) {
-            String declared = Type.getType(f.desc()).getInternalName();
-            String origin = "alan " + simple(f.owner()) + "." + f.name() + " : " + simple(declared);
-            String concrete = concreteOf(declared);
-            if (concrete != null) {
-                cars.add(new AcquiredCar(concrete, declared, origin));
-            } else {
-                for (Assignment a : fieldAssignments(f)) {
-                    cars.addAll(resolveAny(a.flow(), a.value(), depth + 1));
-                }
-                if (cars.isEmpty()) {
-                    cars.add(new AcquiredCar(null, declared, origin));
-                }
-            }
-        } else if (src instanceof CallResult c) {
-            for (MethodDataFlow body : calleeBodies(flow, c)) {
-                for (TrackedValue rv : body.returnValues()) {
-                    cars.addAll(resolveAny(body, rv, depth + 1));
-                }
-            }
-            if (cars.isEmpty()) {
-                String declared = Type.getReturnType(c.method().desc()).getInternalName();
-                cars.add(new AcquiredCar(concreteOf(declared), declared, c.method().toShortString()
-                        + " donus degeri" + at(flow, flow.insn(c.insn()))));
-            }
-        } else if (src instanceof Parameter p) {
-            cars.addAll(resolveFromCallers(flow, p, depth));
-            if (cars.isEmpty()) {
-                String declared = Type.getType(p.desc()).getInternalName();
-                cars.add(new AcquiredCar(concreteOf(declared), declared, parameterText(flow, p)));
-            }
-        } else if (src instanceof This) {
-            String owner = flow.method().owner();
-            cars.add(new AcquiredCar(concreteOf(owner), owner, "this (" + simple(owner) + ")"));
-        }
-        return cars;
-    }
-
-    /** {@code src} is a collection, array or other holder: find the target-typed objects put into it. */
-    private Set<AcquiredCar> resolveContainer(MethodDataFlow flow, ValueSource src, int depth) {
-        Set<AcquiredCar> cars = new LinkedHashSet<>(mutationsOf(flow, src, depth));
-        if (src instanceof FieldValue f) {
-            for (Assignment a : fieldAssignments(f)) {
-                cars.addAll(resolveAny(a.flow(), a.value(), depth + 1));
-            }
-            ClassNode owner = classNode(f.owner()).orElse(null);
-            if (owner != null) {
-                for (MethodNode m : owner.methods) {
-                    MethodDataFlow other = flow(new MethodRef(owner.name, m.name, m.desc)).orElse(null);
-                    if (other != null && !other.method().equals(flow.method())) {
-                        cars.addAll(mutationsOf(other, src, depth + 1));
-                    }
-                }
-            }
-        } else if (src instanceof CallResult c) {
-            List<MethodDataFlow> bodies = calleeBodies(flow, c);
-            for (MethodDataFlow body : bodies) {
-                for (TrackedValue rv : body.returnValues()) {
-                    cars.addAll(resolveAny(body, rv, depth + 1));
-                }
-            }
-            if (bodies.isEmpty()) {
-                // Library call such as List.of(a, b), Arrays.asList(arr), list.stream().toList(), list.get(0):
-                // the result is made of the receiver and the arguments.
-                MethodInsnNode call = (MethodInsnNode) flow.insn(c.insn());
-                cars.addAll(resolveAny(flow, flow.receiver(call), depth + 1));
-                for (TrackedValue arg : flow.arguments(call)) {
-                    cars.addAll(resolveAny(flow, arg, depth + 1));
-                }
-            }
-        } else if (src instanceof Parameter p) {
-            cars.addAll(resolveFromCallers(flow, p, depth));
-        }
-        return cars;
-    }
-
-    /** Elements added to {@code src} inside {@code flow}: {@code add/addAll/...}, constructors, array stores. */
-    private Set<AcquiredCar> mutationsOf(MethodDataFlow flow, ValueSource src, int depth) {
-        Set<AcquiredCar> cars = new LinkedHashSet<>();
-        for (AbstractInsnNode insn : flow.instructions()) {
-            if (insn instanceof MethodInsnNode m) {
-                TrackedValue receiver = flow.receiver(m);
-                List<TrackedValue> args = flow.arguments(m);
-                if (receiver != null && receiver.sources().contains(src) && MUTATORS.contains(m.name)) {
-                    args.forEach(a -> cars.addAll(resolveAny(flow, a, depth + 1)));
-                } else if (m.getOpcode() == Opcodes.INVOKESTATIC && m.name.equals("addAll")
-                        && args.stream().anyMatch(a -> a.sources().contains(src))) {
-                    // Collections.addAll(list, a, b, c)
-                    args.stream().filter(a -> !a.sources().contains(src))
-                            .forEach(a -> cars.addAll(resolveAny(flow, a, depth + 1)));
-                }
-            } else if (insn.getOpcode() == Opcodes.AASTORE) {
-                TrackedValue array = flow.stack(insn, 2);
-                if (array != null && array.sources().contains(src)) {
-                    cars.addAll(resolveAny(flow, flow.stack(insn, 0), depth + 1));
-                }
-            }
-        }
-        return cars;
-    }
-
-    private Set<AcquiredCar> resolveFromCallers(MethodDataFlow flow, Parameter p, int depth) {
-        Set<AcquiredCar> cars = new LinkedHashSet<>();
-        int index = flow.parameterIndex(p.local());
-        if (index < 0) {
-            return cars;
-        }
-        for (Map.Entry<MethodRef, List<CallEdge>> e : result.edges().entrySet()) {
-            for (CallEdge edge : e.getValue()) {
-                if (edge.site().viaLambda()
-                        || edge.targets().stream().noneMatch(t -> t.method().equals(flow.method()))) {
-                    continue;
-                }
-                MethodDataFlow caller = flow(e.getKey()).orElse(null);
-                if (caller == null) {
-                    continue;
-                }
-                for (MethodInsnNode call : callInsns(caller, edge.site())) {
-                    List<TrackedValue> args = caller.arguments(call);
-                    if (index < args.size()) {
-                        cars.addAll(resolveAny(caller, args.get(index), depth + 1));
-                    }
-                }
-            }
-        }
-        return cars;
-    }
-
-    private record Assignment(MethodDataFlow flow, TrackedValue value) {
-    }
-
-    /** Values stored into a field by the methods of its declaring class (constructors, setters, init methods). */
-    private List<Assignment> fieldAssignments(FieldValue f) {
-        List<Assignment> found = new ArrayList<>();
-        ClassNode owner = classNode(f.owner()).orElse(null);
-        if (owner == null) {
-            return found;
-        }
-        for (MethodNode m : owner.methods) {
-            MethodDataFlow flow = flow(new MethodRef(owner.name, m.name, m.desc)).orElse(null);
-            if (flow == null) {
-                continue;
-            }
-            for (AbstractInsnNode insn : flow.instructions()) {
-                if ((insn.getOpcode() == Opcodes.PUTFIELD || insn.getOpcode() == Opcodes.PUTSTATIC)
-                        && insn instanceof FieldInsnNode put
-                        && put.owner.equals(f.owner()) && put.name.equals(f.name())) {
-                    TrackedValue v = flow.stack(insn, 0);
-                    if (v != null) {
-                        found.add(new Assignment(flow, v));
-                    }
-                }
-            }
-        }
-        return found;
-    }
-
-    /** Bodies of the loaded methods a call may run (empty for library calls). */
-    private List<MethodDataFlow> calleeBodies(MethodDataFlow flow, CallResult c) {
-        MethodInsnNode call = (MethodInsnNode) flow.insn(c.insn());
-        CallSite site = new CallSite(kindOf(call), c.method(), -1, false);
-        List<MethodDataFlow> bodies = new ArrayList<>();
-        for (DispatchTarget t : hierarchy.dispatch(site)) {
-            flow(t.method()).ifPresent(bodies::add);
-        }
-        return bodies;
-    }
-
-    private List<MethodInsnNode> callInsns(MethodDataFlow flow, CallSite site) {
-        List<MethodInsnNode> calls = new ArrayList<>();
-        for (AbstractInsnNode insn : flow.instructions()) {
-            if (insn instanceof MethodInsnNode m && m.owner.equals(site.target().owner())
-                    && m.name.equals(site.target().name()) && m.desc.equals(site.target().desc())
-                    && (site.line() < 0 || flow.lineOf(m) == site.line())) {
-                calls.add(m);
-            }
-        }
-        return calls;
-    }
-
     // ------------------------------------------------------------------------------------------------ helpers
 
-    private String typeOf(MethodDataFlow flow, ValueSource src) {
-        Type t;
-        if (src instanceof NewObject n) {
-            t = n.type().startsWith("[") ? Type.getType(n.type()) : Type.getObjectType(n.type());
-        } else if (src instanceof FieldValue f) {
-            t = Type.getType(f.desc());
-        } else if (src instanceof CallResult c) {
-            t = Type.getReturnType(c.method().desc());
-        } else if (src instanceof Parameter p) {
-            t = Type.getType(p.desc());
-        } else {
-            t = Type.getObjectType(flow.method().owner());
+    private Set<AcquiredCar> resolveCars(MethodDataFlow flow, TrackedValue value) {
+        Set<AcquiredCar> cars = new LinkedHashSet<>();
+        for (Resolved r : resolver().resolve(flow, value)) {
+            cars.add(new AcquiredCar(r.concreteClass(), r.declaredType(), r.origin()));
         }
-        return t.getSort() == Type.OBJECT ? t.getInternalName() : null;
+        return cars;
+    }
+
+    private ValueResolver resolver() {
+        if (resolver == null) {
+            resolver = new ValueResolver(hierarchy, repo, this::isTargetType,
+                    ValueResolver.callersFromEdges(result.edges(), repo));
+        }
+        return resolver;
     }
 
     private boolean isTargetType(String type) {
         return type != null && result.targets().stream().anyMatch(t -> hierarchy.isSubtypeOf(type, t));
     }
 
-    /** The class an instance of {@code type} must be: the type itself if concrete, or its only concrete subtype. */
     private String concreteOf(String type) {
-        ClassInfo c = hierarchy.get(type);
-        if (c != null && c.isConcrete()) {
-            return type;
-        }
-        List<String> concrete = hierarchy.allSubtypes(type).stream()
-                .filter(s -> hierarchy.get(s) != null && hierarchy.get(s).isConcrete())
-                .toList();
-        return concrete.size() == 1 ? concrete.get(0) : null;
-    }
-
-    private Optional<MethodDataFlow> flow(MethodRef ref) {
-        return flows.computeIfAbsent(ref, r -> classNode(r.owner()).flatMap(cn -> cn.methods.stream()
-                .filter(m -> m.name.equals(r.name()) && m.desc.equals(r.desc()))
-                .findFirst()
-                .flatMap(m -> MethodDataFlow.analyze(cn, m))));
-    }
-
-    private Optional<ClassNode> classNode(String internalName) {
-        return classNodes.computeIfAbsent(internalName, n -> {
-            byte[] bytes = classBytes.get(n);
-            if (bytes == null) {
-                return Optional.empty();
-            }
-            ClassNode cn = new ClassNode();
-            new ClassReader(bytes).accept(cn, ClassReader.SKIP_FRAMES);
-            return Optional.of(cn);
-        });
-    }
-
-    private static InvokeKind kindOf(MethodInsnNode m) {
-        return switch (m.getOpcode()) {
-            case Opcodes.INVOKESTATIC -> InvokeKind.STATIC;
-            case Opcodes.INVOKESPECIAL -> InvokeKind.SPECIAL;
-            case Opcodes.INVOKEINTERFACE -> InvokeKind.INTERFACE;
-            default -> InvokeKind.VIRTUAL;
-        };
-    }
-
-    private static String at(MethodDataFlow flow, AbstractInsnNode insn) {
-        int line = flow.lineOf(insn);
-        return " (" + (flow.sourceFile() == null ? "?" : flow.sourceFile()) + (line > 0 ? ":" + line : "") + ")";
-    }
-
-    private static String parameterText(MethodDataFlow flow, Parameter p) {
-        String name = flow.parameterName(p.local());
-        return flow.method().toShortString() + " metodunun " + (flow.parameterIndex(p.local()) + 1)
-                + ". parametresi" + (name == null ? "" : " '" + name + "'");
+        return resolver().concreteOf(type);
     }
 
     private static String simple(String internalName) {

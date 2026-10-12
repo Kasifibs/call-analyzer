@@ -9,8 +9,10 @@ import callanalyzer.model.MethodInfo;
 import callanalyzer.model.MethodRef;
 
 import java.io.PrintWriter;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -32,11 +34,15 @@ public final class CallTreePrinter {
     private final PrintWriter out;
     private final Set<MethodRef> printed = new HashSet<>();
     private final Set<List<Object>> hits = new HashSet<>();
+    private final Map<List<Object>, String> eventLabels = new HashMap<>();
 
     private CallTreePrinter(AnalysisResult result, PrintWriter out) {
         this.result = result;
         this.out = out;
         result.findings().forEach(f -> hits.add(List.of(f.caller(), f.site())));
+        result.events().forEach(e -> result.edges().getOrDefault(e.caller(), List.of()).stream()
+                .filter(edge -> edge.site().target().equals(e.dispatchMethod()) && edge.site().line() == e.line())
+                .forEach(edge -> eventLabels.put(List.of(edge.caller(), edge.site()), e.label())));
     }
 
     public static void write(AnalysisResult result, PrintWriter out) {
@@ -66,7 +72,8 @@ public final class CallTreePrinter {
             List<DispatchTarget> expandable = edge.targets().stream()
                     .filter(t -> result.edges().containsKey(t.method()))
                     .toList();
-            if (!hit && expandable.isEmpty() && !hasUnexpandedAnalysable(edge)) {
+            String event = eventLabels.get(List.of(edge.caller(), edge.site()));
+            if (!hit && event == null && expandable.isEmpty() && !hasUnexpandedAnalysable(edge)) {
                 continue;
             }
             String marker = hit ? "* " : "-> ";
@@ -77,7 +84,8 @@ public final class CallTreePrinter {
             }
             out.println(pad(indent) + marker + edge.site().target().toShortString() + "  "
                     + TextReport.location(source, edge.site().line())
-                    + (edge.site().viaLambda() ? "  [lambda]" : "") + receivers);
+                    + (edge.site().viaLambda() ? "  [lambda]" : "") + receivers
+                    + (event == null ? "" : "  [" + event + (edge.targets().isEmpty() ? ", dinleyen yok" : "") + "]"));
 
             boolean single = edge.targets().size() == 1 && edge.targets().get(0).method().equals(edge.site().target());
             if (single) {

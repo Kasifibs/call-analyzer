@@ -1,5 +1,7 @@
 package callanalyzer.analysis;
 
+import callanalyzer.events.EventConfig;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -15,6 +17,7 @@ public final class AnalysisOptions {
     private boolean onlyInterfaceMethods;
     private boolean skipInternalCalls;
     private boolean directOnly;
+    private EventConfig events;
 
     /** Entry method selector, see {@link MethodSpec}. */
     public AnalysisOptions entry(String spec) {
@@ -71,6 +74,16 @@ public final class AnalysisOptions {
     public AnalysisOptions directOnly(boolean value) {
         this.directOnly = value;
         return this;
+    }
+
+    /** Follow events: a dispatch continues into the observers registered for the event (see {@code EventRouter}). */
+    public AnalysisOptions events(EventConfig config) {
+        this.events = config;
+        return this;
+    }
+
+    public EventConfig events() {
+        return events;
     }
 
     public List<String> entries() {
