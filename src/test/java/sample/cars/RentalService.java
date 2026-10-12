@@ -51,4 +51,15 @@ public class RentalService {
     public void rentLegacyAnnotated() {
         bmw.openSunroof();
     }
+
+    @AcquireCar(cars = Bmw.class)
+    public void rentWithHelperAcquire() {
+        bmw.openSunroof();
+        tesla.charge(); // Tesla is only acquired by the helper below: it must still be reported missing
+        acquireTesla();
+    }
+
+    private void acquireTesla() {
+        CarAcquirer.acquire(List.of(tesla));
+    }
 }

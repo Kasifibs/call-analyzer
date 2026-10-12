@@ -31,7 +31,7 @@ public final class AcquireReport {
         if (c.annotation() != null) sources.add("@" + MethodRef.toDottedName(c.annotation()));
         out.println("=== Acquire karsilastirmasi: " + String.join(", ", sources) + " ===");
         if (c.calls().isEmpty() && c.annotations().stream().noneMatch(AnnotationCheck::present)) {
-            out.println("UYARI: Akista " + String.join(" ya da ", sources)
+            out.println("UYARI: Giris metodunda " + String.join(" ya da ", sources)
                     + " bulunamadi; kullanilan tum siniflar eksik sayildi.");
         }
         for (AnnotationCheck a : c.annotations()) {
@@ -70,6 +70,15 @@ public final class AcquireReport {
         out.println();
         out.println("[OK] Acquire edilmis ve kullaniliyor: "
                 + simpleNames(c.covered().stream().map(ClassUsage::className).toList()));
+        if (!c.otherCalls().isEmpty()) {
+            out.println();
+            out.println("Bilgi: akistaki diger acquire cagrilari (giris metodunda degil, karsilastirmaya dahil edilmedi):");
+            for (AcquireCall call : c.otherCalls()) {
+                out.println("  Cagri: " + call.caller().toShortString() + "  "
+                        + TextReport.location(call.sourceFile(), call.line()));
+                writeCars(out, call.cars());
+            }
+        }
         out.flush();
     }
 
@@ -116,14 +125,8 @@ public final class AcquireReport {
             am.put("cars", cars(a.cars()));
             return am;
         }).toList());
-        m.put("calls", c.calls().stream().map(call -> {
-            Map<String, Object> cm = new LinkedHashMap<>();
-            cm.put("caller", call.caller().toQualifiedString());
-            cm.put("sourceFile", call.sourceFile());
-            cm.put("line", call.line());
-            cm.put("cars", cars(call.cars()));
-            return cm;
-        }).toList());
+        m.put("calls", calls(c.calls()));
+        m.put("otherCalls", calls(c.otherCalls()));
         m.put("acquired", dotted(c.acquired()));
         m.put("covered", usages(c.covered()));
         m.put("missing", usages(c.missing()));
@@ -131,6 +134,17 @@ public final class AcquireReport {
         m.put("undecided", usages(c.undecided()));
         m.put("unused", dotted(c.unused()));
         return m;
+    }
+
+    private static List<Object> calls(List<AcquireCall> calls) {
+        return calls.stream().map(call -> {
+            Map<String, Object> cm = new LinkedHashMap<>();
+            cm.put("caller", call.caller().toQualifiedString());
+            cm.put("sourceFile", call.sourceFile());
+            cm.put("line", call.line());
+            cm.put("cars", cars(call.cars()));
+            return (Object) cm;
+        }).toList();
     }
 
     private static List<Object> cars(List<AcquiredCar> cars) {

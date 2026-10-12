@@ -34,7 +34,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
- * Finds the calls of an "acquirer" method (e.g. {@code CarAcquirer.acquire(List<ICar>)}) in an analysed flow and
+ * Finds the calls of an "acquirer" method (e.g. {@code CarAcquirer.acquire(List<ICar>)}) in the entry method(s) and
  * determines which target implementations are put into the list it receives; and/or reads the acquire annotation
  * on the entry methods (e.g. {@code @AcquireCar(cars = {Opel.class, Mercedes.class})}). The acquired classes are
  * then compared with the implementations the flow actually calls.
@@ -101,6 +101,12 @@ public final class AcquireAnalyzer {
             }
         }
 
+        // Like the annotation, only the entry method's own acquire calls count: an acquire made somewhere deeper in the
+        // flow (a helper, an event observer, ...) must not hide classes the entry method itself failed to acquire.
+        Set<MethodRef> entries = new HashSet<>(result.entries());
+        List<AcquireCall> otherCalls = calls.stream().filter(c -> !entries.contains(c.caller())).toList();
+        calls.removeIf(c -> !entries.contains(c.caller()));
+
         List<AnnotationCheck> annotations = annotationType == null ? List.of() : annotationChecks();
 
         Set<String> acquired = new TreeSet<>();
@@ -115,12 +121,13 @@ public final class AcquireAnalyzer {
                 unresolved.add(car);
             }
         }
-        return compare(calls, annotations, acquired, unresolved, acquirerMethods);
+        return compare(calls, otherCalls, annotations, acquired, unresolved, acquirerMethods);
     }
 
     // ------------------------------------------------------------------------------------------------ comparison
 
-    private AcquireComparison compare(List<AcquireCall> calls, List<AnnotationCheck> annotations, Set<String> acquired,
+    private AcquireComparison compare(List<AcquireCall> calls, List<AcquireCall> otherCalls,
+                                      List<AnnotationCheck> annotations, Set<String> acquired,
                                       List<AcquiredCar> unresolved, Set<MethodRef> acquirerMethods) {
         Map<String, List<Finding>> certain = new TreeMap<>();
         Map<String, List<Finding>> possible = new TreeMap<>();
@@ -154,7 +161,7 @@ public final class AcquireAnalyzer {
                 .filter(a -> used.stream().noneMatch(u -> hierarchy.isSubtypeOf(u, a)))
                 .toList();
         return new AcquireComparison(acquirerSpec == null ? null : acquirerSpec.text(), annotationType,
-                List.copyOf(calls), List.copyOf(annotations), List.copyOf(acquired),
+                List.copyOf(calls), List.copyOf(otherCalls), List.copyOf(annotations), List.copyOf(acquired),
                 List.copyOf(unresolved), covered, missing, possiblyMissing, undecided, unused);
     }
 

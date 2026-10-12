@@ -84,7 +84,11 @@ class AcquireAnalyzerTest {
         assertEquals(List.of("Bmw", "TowTruck"), acquired(compare("sample.cars.AcquirePatterns#viaArrayList")));
         assertEquals(List.of("Bmw", "Tesla"), acquired(compare("sample.cars.AcquirePatterns#viaArraysAsList")));
         assertEquals(List.of("Tesla"), acquired(compare("sample.cars.AcquirePatterns#viaGetter")));
-        assertEquals(List.of("Bmw"), acquired(compare("sample.cars.AcquirePatterns#viaParameter")));
+        // the acquire call is in run(), not in the entry method: resolved, but reported only for information
+        AcquireComparison viaParameter = compare("sample.cars.AcquirePatterns#viaParameter");
+        assertTrue(viaParameter.acquired().isEmpty());
+        assertEquals(List.of("sample/cars/Bmw"), viaParameter.otherCalls().get(0).cars().stream()
+                .map(AcquiredCar::concreteClass).toList());
         assertEquals(List.of("TowTruck"), acquired(compare("sample.cars.AcquirePatterns#viaFieldList")));
         assertEquals(List.of("Bmw"), acquired(compare("sample.cars.AcquirePatterns#viaCopy")));
     }
@@ -136,5 +140,16 @@ class AcquireAnalyzerTest {
         assertEquals(2, a.cars().size());
         assertTrue(a.cars().get(1).origin().contains("hedef tipi uygulamiyor"));
         assertEquals(List.of("Bmw"), names(c.covered()));
+    }
+
+    @Test
+    void onlyTheEntryMethodsOwnAcquireCallsCount() {
+        AcquireComparison c = compare("sample.cars.RentalService#rentWithHelperAcquire",
+                "sample.cars.CarAcquirer#acquire", "sample.cars.AcquireCar");
+        assertTrue(c.calls().isEmpty());
+        assertEquals(1, c.otherCalls().size());
+        assertEquals("acquireTesla", c.otherCalls().get(0).caller().name());
+        assertEquals(List.of("Bmw"), acquired(c)); // only the annotation of the entry method
+        assertEquals(List.of("Tesla"), names(c.missing()));
     }
 }

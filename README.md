@@ -50,7 +50,7 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--skip-internal` | `ICar` uygulayan sınıfların kendi içinden yaptığı çağrıları raporlama. |
 | `--direct-only` | Yalnızca statik tipi zaten hedef tipten olan çağrıları raporla (`Object#toString()` üzerinden “olası” eşleşmeleri atla). |
 | `--include-constructors` | `new Bmw()` gibi kurucu çağrılarını da raporla. |
-| `--acquirer <metot>` | Ör. `com.example.CarAcquirer#acquire`. Akışta bu metoda verilen listedeki `ICar` nesnelerini bulur ve akışta kullanılan sınıflarla karşılaştırır (bkz. aşağıda). |
+| `--acquirer <metot>` | Ör. `com.example.CarAcquirer#acquire`. Giriş metodunda bu metoda verilen listedeki `ICar` nesnelerini bulur ve akışta kullanılan sınıflarla karşılaştırır (bkz. aşağıda). |
 | `--acquire-annotation <tip>` | Ör. `com.example.AcquireCar`. Analiz edilen (giriş) metotta bu anotasyon var mı bakar, içinde verilen sınıfları listeler ve karşılaştırmaya ekler. `--acquirer` ile birlikte kullanılabilir. |
 | `--fail-on-missing` | Karşılaştırmada kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
 | `--event-class`, `--event-dispatcher`, `--event-observer` | Event takibi (bkz. aşağıda). Üçü birlikte verilir. |
@@ -112,8 +112,13 @@ Raporun sonunda, uygulama sınıfı bazında hangi metotların kaç yerden çağ
 
 ## Acquire listesi karşılaştırması (`--acquirer`)
 
-Akışın başında genellikle `CarAcquirer.acquire(List<ICar>)` gibi bir çağrı varsa, araç bu listeye konan `ICar`
-nesnelerini bulur ve akışta gerçekten çağrılan `ICar` sınıflarıyla karşılaştırır:
+Giriş metodunda (genellikle başında) `CarAcquirer.acquire(List<ICar>)` gibi bir çağrı varsa, araç bu listeye konan
+`ICar` nesnelerini bulur ve akışta gerçekten çağrılan `ICar` sınıflarıyla karşılaştırır.
+
+Yalnızca giriş metodunun (`--entry`) **kendi** `acquire` çağrıları sayılır (anotasyonla aynı kural). Akışta daha
+derinde (bir yardımcı metotta, event ile tetiklenen bir observer'da, ...) yapılan `acquire` çağrıları, giriş metodunun
+eksiklerini örtmesin diye karşılaştırmaya alınmaz; raporun sonunda "Bilgi: akistaki diger acquire cagrilari"
+başlığı altında listelenir.
 
 ```bash
 java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --cp uygulamam.jar \
@@ -165,8 +170,8 @@ Listenin içeriği bytecode üzerinde veri akışı analiziyle bulunur. Destekle
 - `new`: `acquire(List.of(new Bmw(), new Tesla()))`, `Arrays.asList(...)`, `new ArrayList<>(List.of(...))`
 - `List<ICar> l = new ArrayList<>(); l.add(bmw); acquire(l)`
 - Listeyi döndüren bir metot (`acquire(cars())`), liste tutan bir alan (kurucuda doldurulan `fleet`)
-- Listenin parametre olarak gelmesi (`run(List.of(bmw))` → `run(List<ICar> cars) { acquire(cars); }`): akıştaki
-  çağıranlara bakılır.
+- Listenin bir değişken ya da yardımcı metot üzerinden gelmesi; listenin kendisi giriş metodunun parametresiyse
+  (`--entry` ile verilen metodun dışarıdan aldığı liste) içeriği bilinemez.
 
 Karşılaştırmada şunlar sayılmaz: `acquire` metodunun kendi içindeki çağrılar, statik metotlar ve kurucular, bir
 `ICar` sınıfının kendi metotlarını çağırması (`this` üzerinden; nesne zaten hesaba katılmıştır).
