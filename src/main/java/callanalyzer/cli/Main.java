@@ -11,6 +11,7 @@ import callanalyzer.loader.ClassPathLoader;
 import callanalyzer.report.AcquireReport;
 import callanalyzer.report.CallTreePrinter;
 import callanalyzer.report.EventReport;
+import callanalyzer.report.HtmlReport;
 import callanalyzer.report.JsonReport;
 import callanalyzer.report.TextReport;
 
@@ -78,7 +79,9 @@ public final class Main {
                                          or. 'event-class=com.example.event.Event'. Tekrarlanabilen secenekler
                                          (cp, entry, target, include, exclude) virgulle ayrilabilir; tree=true
                                          gibi bayraklar true/false alir. Komut satiri dosyadakilere eklenir.
-              --format text|json         Cikti bicimi (varsayilan: text).
+              --format text|json|html    Cikti bicimi (varsayilan: text). html: tarayicida acilan, agaci ve
+                                         zincirleri tiklayarak gezebileceginiz tek dosyalik rapor (-o ile).
+              --open                     Raporu yazdiktan sonra varsayilan tarayicida/uygulamada ac.
               --output, -o <dosya>       Ciktiyi dosyaya yaz.
               --help, -h                 Bu yardimi goster.
             """;
@@ -105,6 +108,7 @@ public final class Main {
         String eventObserver = null;
         String eventHandle = null;
         String format = "text";
+        boolean openAfter = false;
         Path output = null;
         try {
             args = expandConfig(args);
@@ -138,6 +142,7 @@ public final class Main {
                     case "--event-observer" -> eventObserver = value(args, ++i, a);
                     case "--event-handle-method" -> eventHandle = value(args, ++i, a);
                     case "--format" -> format = value(args, ++i, a);
+                    case "--open" -> openAfter = true;
                     case "--output", "-o" -> output = Path.of(value(args, ++i, a));
                     default -> throw new IllegalArgumentException("Bilinmeyen arguman: " + a);
                 }
@@ -148,7 +153,7 @@ public final class Main {
             if (eventClass != null || eventDispatcher != null || eventObserver != null) {
                 options.events(new EventConfig(eventClass, eventDispatcher, eventObserver, eventHandle));
             }
-            if (!format.equals("text") && !format.equals("json")) {
+            if (!format.equals("text") && !format.equals("json") && !format.equals("html")) {
                 throw new IllegalArgumentException("Gecersiz --format: " + format);
             }
         } catch (IllegalArgumentException e) {
@@ -177,6 +182,8 @@ public final class Main {
             try {
                 if (format.equals("json")) {
                     JsonReport.write(result, acquire, out);
+                } else if (format.equals("html")) {
+                    HtmlReport.write(result, acquire, out);
                 } else {
                     TextReport.write(result, out);
                     if (options.events() != null) {
@@ -195,6 +202,11 @@ public final class Main {
             }
             if (output != null) {
                 stderr.println(result.findings().size() + " cagri bulundu, rapor yazildi: " + output);
+                if (openAfter) {
+                    openInDesktop(output, stderr);
+                }
+            } else if (openAfter) {
+                stderr.println("UYARI: --open icin -o ile bir dosya verilmeli.");
             }
             if (failOnMissing && acquire != null && !acquire.missing().isEmpty()) {
                 return 3;
@@ -239,6 +251,19 @@ public final class Main {
      * Replaces {@code --config <file>} with the options in the file. Each line is {@code option=value} (comments
      * start with {@code #}); backslashes are kept as they are, so Windows paths can be written directly.
      */
+    private static void openInDesktop(Path file, PrintStream stderr) {
+        try {
+            if (java.awt.Desktop.isDesktopSupported()
+                    && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.OPEN)) {
+                java.awt.Desktop.getDesktop().open(file.toFile());
+                return;
+            }
+        } catch (IOException | RuntimeException e) {
+            // fall through to the message below
+        }
+        stderr.println("Rapor otomatik acilamadi, elle acin: " + file.toAbsolutePath());
+    }
+
     public static String[] expandConfig(String[] args) {
         List<String> result = new ArrayList<>();
         for (int i = 0; i < args.length; i++) {

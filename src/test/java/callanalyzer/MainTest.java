@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MainTest {
@@ -115,6 +116,28 @@ class MainTest {
         m.setAccessible(true);
         assertEquals(List.of(dir.resolve("a.jar"), dir.resolve("b.jar")), m.invoke(null, dir + File.separator + "*"));
         assertEquals(List.of(dir.resolve("a.jar"), dir.resolve("b.jar")), m.invoke(null, dir + "/*"));
+    }
+
+    @Test
+    void htmlReportIsSelfContainedAsciiAndEmbedsTheData(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("rapor.html");
+        Run r = run("--cp", Fixtures.sampleClassesDir().toString(), "--entry", "sample.events.EventFlowService#rent",
+                "--target", "sample.cars.ICar", "--event-class", "sample.events.Event", "--event-dispatcher",
+                "sample.events.EventDispatcher", "--event-observer", "sample.events.IObserver",
+                "--acquire-annotation", "sample.cars.AcquireCar", "--format", "html", "-o", file.toString());
+        assertEquals(0, r.exit(), r.err());
+        String html = Files.readString(file);
+        assertTrue(html.chars().allMatch(c -> c < 128), "non-ASCII byte in the HTML report");
+        assertTrue(html.startsWith("<!doctype html>"));
+        assertFalse(html.contains("/*DATA*/"));
+        assertFalse(html.contains("src=\"http") || html.contains("href=\"http"), "must not load external resources");
+        // the embedded JSON must not be able to close its <script> block
+        assertEquals(2, html.split("</script>", -1).length - 1);
+        String data = html.substring(html.indexOf("<script id=\"data\""), html.indexOf("</script>"));
+        assertTrue(data.contains("\"findings\":[{"));
+        assertTrue(data.contains("CarRentedObserver#handle(CarRentedEvent)"));
+        assertTrue(data.contains("\"e\":\"event CAR_RENTED\""));
+        assertTrue(html.contains("&#199;a&#287;r&#305; Analizi"), "Turkish text is written as character references");
     }
 
     @Test

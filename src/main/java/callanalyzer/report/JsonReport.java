@@ -33,9 +33,7 @@ public final class JsonReport {
         if (acquire != null) {
             root.put("acquire", AcquireReport.toJson(acquire));
         }
-        StringBuilder sb = new StringBuilder();
-        append(sb, root, 0);
-        out.println(sb);
+        out.println(Json.pretty(root));
         out.flush();
     }
 
@@ -68,59 +66,5 @@ public final class JsonReport {
                     return c;
                 }).toList());
         return m;
-    }
-
-    private static void append(StringBuilder sb, Object value, int indent) {
-        if (value instanceof Map<?, ?> map) {
-            if (map.isEmpty()) {
-                sb.append("{}");
-                return;
-            }
-            sb.append("{\n");
-            int i = 0;
-            for (Map.Entry<?, ?> e : map.entrySet()) {
-                sb.append("  ".repeat(indent + 1)).append(str(String.valueOf(e.getKey()))).append(": ");
-                append(sb, e.getValue(), indent + 1);
-                sb.append(++i < map.size() ? ",\n" : "\n");
-            }
-            sb.append("  ".repeat(indent)).append('}');
-        } else if (value instanceof List<?> list) {
-            if (list.isEmpty()) {
-                sb.append("[]");
-                return;
-            }
-            sb.append("[\n");
-            for (int i = 0; i < list.size(); i++) {
-                sb.append("  ".repeat(indent + 1));
-                append(sb, list.get(i), indent + 1);
-                sb.append(i < list.size() - 1 ? ",\n" : "\n");
-            }
-            sb.append("  ".repeat(indent)).append(']');
-        } else if (value instanceof Number || value instanceof Boolean) {
-            sb.append(value);
-        } else {
-            sb.append(str(value == null ? null : value.toString()));
-        }
-    }
-
-    static String str(String s) {
-        if (s == null) {
-            return "null";
-        }
-        StringBuilder sb = new StringBuilder("\"");
-        for (char c : s.toCharArray()) {
-            switch (c) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                default -> {
-                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-                    else sb.append(c);
-                }
-            }
-        }
-        return sb.append('"').toString();
     }
 }

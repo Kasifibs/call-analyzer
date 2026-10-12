@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Çağrı Analizi</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --border: #e3e6eb;
+    --accent: #2f5bd3; --accent-bg: #e9efff;
+    --hit: #c2371f; --hit-bg: #fdecea; --warn: #a15c00; --warn-bg: #fff4e0;
+    --ok: #1d7a46; --ok-bg: #e6f5ec; --event: #6b3fb8; --event-bg: #f0e9fc;
+    --neutral-bg: #eef0f3; --row-hover: #f2f5fb; --flash: #fff3b0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161b; --panel: #1c1f26; --text: #e4e7ec; --muted: #98a2b3; --border: #2e333d;
+      --accent: #7ea2ff; --accent-bg: #23304f;
+      --hit: #ff8a73; --hit-bg: #3a1f1b; --warn: #f4b55a; --warn-bg: #3a2c14;
+      --ok: #6fd39a; --ok-bg: #18311f; --event: #c5a4ff; --event-bg: #2b2140;
+      --neutral-bg: #262a33; --row-hover: #232835; --flash: #4a4320;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+  header { padding: 16px 24px 8px; }
+  header h1 { margin: 0 0 4px; font-size: 20px; }
+  header .sub { color: var(--muted); }
+  nav { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  nav button { background: none; border: none; padding: 10px 14px; cursor: pointer; color: var(--muted);
+               font: inherit; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  nav .count { background: var(--neutral-bg); border-radius: 10px; padding: 0 7px; margin-left: 4px; font-size: 12px; }
+  nav .count.bad { background: var(--hit-bg); color: var(--hit); }
+  main { padding: 16px 24px 48px; }
+  section { display: none; }
+  section.active { display: block; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+           margin-bottom: 14px; }
+  .panel h2 { margin: 0 0 10px; font-size: 15px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .card .v { font-size: 26px; font-weight: 600; }
+  .card .k { color: var(--muted); font-size: 12px; }
+  .card.bad .v { color: var(--hit); } .card.warn .v { color: var(--warn); } .card.good .v { color: var(--ok); }
+  .muted { color: var(--muted); }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar input[type=search] { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+           background: var(--panel); color: var(--text); font: inherit; min-width: 260px; }
+  .toolbar label { color: var(--muted); user-select: none; }
+  button.btn { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel);
+           color: var(--text); cursor: pointer; font: inherit; }
+  button.btn:hover { border-color: var(--accent); color: var(--accent); }
+  button.link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
+  button.link:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr.f-row { cursor: pointer; }
+  tr.f-row:hover { background: var(--row-hover); }
+  tr.f-row.open { background: var(--accent-bg); }
+  tr.detail td { background: var(--row-hover); }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 10px; font-size: 12px; margin: 1px 2px 1px 0;
+           background: var(--neutral-bg); color: var(--muted); white-space: nowrap; }
+  .badge.hit { background: var(--hit-bg); color: var(--hit); } .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); } .badge.event { background: var(--event-bg); color: var(--event); }
+  .badge.acc { background: var(--accent-bg); color: var(--accent); }
+  ol.chain { margin: 6px 0; padding-left: 22px; }
+  ol.chain li { margin: 3px 0; }
+  .tree .node > .children { margin-left: 20px; border-left: 1px dashed var(--border); padding-left: 6px; display: none; }
+  .tree .node.open > .children { display: block; }
+  .tree .row { display: flex; align-items: baseline; gap: 6px; padding: 2px 4px; border-radius: 4px; flex-wrap: wrap; }
+  .tree .row:hover { background: var(--row-hover); }
+  .tree .tg { width: 14px; display: inline-block; color: var(--muted); cursor: pointer; user-select: none; text-align: center; }
+  .tree .row.leaf .tg { cursor: default; }
+  .tree .lbl { cursor: pointer; }
+  .tree .row.hit .lbl { color: var(--hit); font-weight: 600; }
+  .tree .row.target .lbl { color: var(--accent); }
+  .tree .row.dim { opacity: .55; }
+  .tree .loc { color: var(--muted); font-size: 12px; }
+  .flash { background: var(--flash) !important; }
+  .cat { border-left: 4px solid var(--border); }
+  .cat.bad { border-left-color: var(--hit); } .cat.warn { border-left-color: var(--warn); }
+  .cat.ok { border-left-color: var(--ok); } .cat.info { border-left-color: var(--accent); }
+  .usage { margin: 8px 0 12px; }
+  .usage .cls { font-weight: 600; }
+  .usage ul { margin: 4px 0; padding-left: 20px; }
+  .grid2 { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+  .warnings li { color: var(--warn); }
+  @media (max-width: 640px) { header, nav, main { padding-left: 12px; padding-right: 12px; }
+    .toolbar input[type=search] { min-width: 0; width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Çağrı Analizi</h1>
+  <div class="sub" id="sub"></div>
+</header>
+<nav id="tabs"></nav>
+<main id="main"></main>
+<script id="data" type="application/json">/*DATA*/</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+const M = D.methods, E = D.edges, F = D.findings;
+const ENTRIES = D.meta.entries;
+const TARGET = D.meta.targets.map(t => t.name.split(".").pop()).join(", ");
+
+// ------------------------------------------------------------------------------------------- helpers
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : String(kid));
+  return e;
+}
+const loc = (f, l) => (f || "?") + (l > 0 ? ":" + l : "");
+const badge = (text, cls) => h("span", {class: "badge " + (cls || "")}, text);
+const callsOf = id => E[id] || [];
+const sameClass = (recv, id) => M[id].s.startsWith(recv + "#");
+
+// Methods from which a call to the target type can be reached (fixpoint, handles recursion).
+const reach = new Set();
+for (const id of Object.keys(E)) if (callsOf(id).some(c => c.h.length)) reach.add(+id);
+for (let changed = true; changed;) {
+  changed = false;
+  for (const id of Object.keys(E)) {
+    if (reach.has(+id)) continue;
+    if (callsOf(id).some(c => c.t.some(t => reach.has(t[1])))) { reach.add(+id); changed = true; }
+  }
+}
+
+// Shortest way to reach every method from an entry (for "show in tree").
+const parent = new Map();
+(function bfs() {
+  const queue = [...ENTRIES], seen = new Set(ENTRIES);
+  while (queue.length) {
+    const id = queue.shift();
+    callsOf(id).forEach((c, ci) => c.t.forEach(t => {
+      const tid = t[1];
+      if (M[tid].a && !seen.has(tid)) { seen.add(tid); parent.set(tid, {from: id, ci}); queue.push(tid); }
+    }));
+  }
+})();
+function pathTo(id) {
+  const steps = [];
+  let cur = id;
+  while (parent.has(cur)) { const p = parent.get(cur); steps.unshift({id: cur, ci: p.ci}); cur = p.from; }
+  if (!ENTRIES.includes(cur)) return null;
+  steps.unshift({id: cur, ci: -1});
+  return steps;
+}
+
+// ---------------------------------------------------------------------------------------------- tabs
+const TABS = [];
+function tab(key, label, count, bad, render) { TABS.push({key, label, count, bad, render}); }
+const A = D.acquire;
+tab("ozet", "Özet", null, false, renderSummary);
+tab("bulgular", "Bulgular", F.length, false, renderFindings);
+tab("agac", "Çağrı ağacı", null, false, renderTree);
+if (A) tab("acquire", "Acquire", A.missing.length || null, A.missing.length > 0, renderAcquire);
+if (D.meta.events) tab("event", "Eventler", D.events.dispatches.length, false, renderEvents);
+
+const sections = {};
+const nav = document.getElementById("tabs"), main = document.getElementById("main");
+for (const t of TABS) {
+  t.button = h("button", {onclick: () => show(t.key)}, t.label,
+      t.count != null ? h("span", {class: "count" + (t.bad ? " bad" : "")}, t.count) : null);
+  nav.append(t.button);
+  sections[t.key] = h("section");
+  main.append(sections[t.key]);
+}
+function show(key) {
+  for (const t of TABS) {
+    const active = t.key === key;
+    t.button.classList.toggle("active", active);
+    sections[t.key].classList.toggle("active", active);
+    if (active && !t.done) { t.render(sections[t.key]); t.done = true; }
+  }
+}
+document.getElementById("sub").append(
+    "Giriş: ", ENTRIES.map(id => M[id].s).join(", "), "  ·  Hedef: ", TARGET, "  ·  ", D.meta.generated);
+
+// ------------------------------------------------------------------------------------------- summary
+function renderSummary(sec) {
+  const cards = h("div", {class: "cards"},
+      card(F.length, "Bulunan çağrı (" + TARGET + ")"),
+      card(D.meta.analysed, "İncelenen metot"),
+      card(D.meta.maxDepth, "En derin seviye"));
+  if (A) {
+    cards.append(card(A.missing.length, "Kesin eksik", A.missing.length ? "bad" : "good"));
+    cards.append(card(A.possiblyMissing.length, "Olası eksik", A.possiblyMissing.length ? "warn" : ""));
+  }
+  if (D.meta.events) cards.append(card(D.events.dispatches.length, "Yayınlanan event"));
+  sec.append(cards);
+
+  const info = h("div", {class: "panel"}, h("h2", null, "Analiz"));
+  const grid = h("div", {class: "grid2"});
+  grid.append(h("span", {class: "muted"}, "Giriş metot(lar)ı"), h("span", {class: "mono"}, ENTRIES.map(id => M[id].q).join("\n")));
+  for (const t of D.meta.targets) {
+    grid.append(h("span", {class: "muted"}, "Hedef tip"),
+        h("span", null, h("code", null, t.name), " ", t.impls.map(i => badge(i, "acc"))));
+  }
+  info.append(grid);
+  sec.append(info);
+
+  if (D.meta.warnings.length) {
+    sec.append(h("div", {class: "panel"}, h("h2", null, "Uyarılar"),
+        h("ul", {class: "warnings"}, D.meta.warnings.map(w => h("li", null, w)))));
+  }
+
+  const byClass = new Map();
+  for (const f of F) for (const [recv, impl] of f.r) {
+    if (!byClass.has(recv)) byClass.set(recv, new Map());
+    const m = byClass.get(recv); m.set(impl, (m.get(impl) || 0) + 1);
+  }
+  const table = h("table", null, h("tr", null, h("th", null, "Sınıf"), h("th", null, "Çalışan metot"),
+      h("th", null, "Çağrı yeri")));
+  [...byClass.keys()].sort().forEach(cls => [...byClass.get(cls)].sort().forEach(([impl, n], i) =>
+      table.append(h("tr", null, h("td", null, i === 0 ? h("b", null, cls) : ""), h("td", {class: "mono"}, impl),
+          h("td", null, n)))));
+  sec.append(h("div", {class: "panel"}, h("h2", null, "Uygulama sınıfı bazında özet"),
+      byClass.size ? table : h("p", {class: "muted"}, "Hedef tipe çağrı bulunamadı.")));
+}
+function card(v, k, cls) { return h("div", {class: "card " + (cls || "")}, h("div", {class: "v"}, v), h("div", {class: "k"}, k)); }
+
+// ------------------------------------------------------------------------------------------ findings
+let findingRows = [];
+function renderFindings(sec) {
+  const q = h("input", {type: "search", placeholder: "Ara: metot, sınıf, dosya…", oninput: apply});
+  const onlyCertain = h("input", {type: "checkbox", onchange: apply});
+  const hideInternal = h("input", {type: "checkbox", onchange: apply});
+  const counter = h("span", {class: "muted"});
+  sec.append(h("div", {class: "toolbar"}, q,
+      h("label", null, onlyCertain, " Yalnızca statik tipi eşleşenler"),
+      h("label", null, hideInternal, " Uygulama içi çağrıları gizle"), counter));
+  const table = h("table", null, h("tr", null, h("th", null, "#"), h("th", null, "Çağrılan"),
+      h("th", null, "Olası sınıflar"), h("th", null, "Yer"), h("th", null, "Derinlik"), h("th", null, "Not")));
+  findingRows = F.map((f, i) => {
+    const notes = [];
+    if (f.la) notes.push(badge("lambda"));
+    if (f.im) notes.push(badge(f.tg + " metodu", "acc"));
+    if (!f.rt) notes.push(badge("olası", "warn"));
+    if (f.in) notes.push(badge("uygulama içi"));
+    if (f.ch.some(s => s.v)) notes.push(badge("event", "event"));
+    const row = h("tr", {class: "f-row", onclick: () => toggleFinding(i)},
+        h("td", {class: "muted"}, i + 1), h("td", {class: "mono"}, f.c),
+        h("td", null, f.r.map(r => badge(r[0], "hit"))),
+        h("td", null, h("span", {class: "mono"}, M[f.by].s), h("div", {class: "muted"}, loc(f.f, f.l))),
+        h("td", null, f.d), h("td", null, notes));
+    const text = (f.cq + " " + M[f.by].q + " " + loc(f.f, f.l) + " " + f.r.map(r => r.join(" ")).join(" ")).toLowerCase();
+    table.append(row);
+    return {row, detail: null, text, f};
+  });
+  sec.append(h("div", {class: "panel"}, table));
+  function apply() {
+    const s = q.value.trim().toLowerCase();
+    let n = 0;
+    for (const fr of findingRows) {
+      const visible = (!s || fr.text.includes(s)) && (!onlyCertain.checked || fr.f.rt) && (!hideInternal.checked || !fr.f.in);
+      fr.row.style.display = visible ? "" : "none";
+      if (fr.detail) fr.detail.style.display = visible && fr.row.classList.contains("open") ? "" : "none";
+      if (visible) n++;
+    }
+    counter.textContent = n + " / " + F.length + " çağrı";
+  }
+  apply();
+}
+function toggleFinding(i) {
+  const fr = findingRows[i];
+  const open = !fr.row.classList.contains("open");
+  fr.row.classList.toggle("open", open);
+  if (!fr.detail) {
+    fr.detail = h("tr", {class: "detail"}, h("td"), h("td", {colspan: 5}, findingDetail(fr.f, i)));
+    fr.row.after(fr.detail);
+  }
+  fr.detail.style.display = open ? "" : "none";
+}
+function findingDetail(f, i) {
+  const chain = h("ol", {class: "chain"});
+  f.ch.forEach((s, k) => chain.append(h("li", null,
+      s.v ? badge(s.v, "event") : null, h("span", {class: "mono"}, M[s.id].s),
+      k > 0 ? h("span", {class: "muted"}, "  ← " + loc(M[f.ch[k - 1].id].f, s.l)) : h("span", {class: "muted"}, "  (giriş)"))));
+  chain.append(h("li", null, badge("hedef", "hit"), h("span", {class: "mono"}, f.c),
+      h("span", {class: "muted"}, "  ← " + loc(f.f, f.l))));
+  const impls = h("div", null, h("span", {class: "muted"}, "Çalışabilecek metotlar: "),
+      f.r.length ? f.r.map(r => badge(r[0] + " → " + r[1], "hit")) : h("span", {class: "muted"}, "(uygulaması bulunamadı)"));
+  return h("div", null, h("div", {class: "muted"}, "Çağrı zinciri:"), chain, impls,
+      h("div", {style: "margin-top:6px"}, h("button", {class: "btn", onclick: e => { e.stopPropagation(); revealFinding(i); }},
+          "Ağaçta göster")));
+}
+function showFinding(i) {
+  show("bulgular");
+  const fr = findingRows[i];
+  fr.row.style.display = "";
+  if (!fr.row.classList.contains("open")) toggleFinding(i);
+  flash(fr.row);
+}
+
+// ---------------------------------------------------------------------------------------------- tree
+let treeBox, hitsOnly, treeRendered = false;
+function renderTree(sec) {
+  hitsOnly = h("input", {type: "checkbox", checked: true, onchange: rebuildTree});
+  const q = h("input", {type: "search", placeholder: "Metot ara (ör. Garage#service)", onkeydown: e => { if (e.key === "Enter") find(); }});
+  const status = h("span", {class: "muted"});
+  let matches = [], pos = -1, last = "";
+  function find() {
+    const s = q.value.trim().toLowerCase();
+    if (!s) return;
+    if (s !== last) {
+      matches = M.map((m, id) => id).filter(id => M[id].a && M[id].q.toLowerCase().includes(s) && pathTo(id));
+      pos = -1; last = s;
+    }
+    if (!matches.length) { status.textContent = "Bulunamadı"; return; }
+    pos = (pos + 1) % matches.length;
+    status.textContent = (pos + 1) + " / " + matches.length;
+    revealMethod(matches[pos]);
+  }
+  sec.append(h("div", {class: "toolbar"},
+      h("label", null, hitsOnly, " Yalnızca " + TARGET + " çağrısına giden dallar"),
+      q, h("button", {class: "btn", onclick: find}, "Bul / sonraki"), status,
+      h("button", {class: "btn", onclick: openAllHits}, "Hedef çağrılarını aç"),
+      h("button", {class: "btn", onclick: rebuildTree}, "Tümünü kapat")));
+  sec.append(h("p", {class: "muted"}, "★ hedef tipe çağrı · ⇒ çalışabilecek uygulama · mor etiket: event ile devam eden akış · ↻ özyineleme"));
+  treeBox = h("div", {class: "panel tree mono"});
+  sec.append(treeBox);
+  rebuildTree();
+  treeRendered = true;
+}
+function rebuildTree() {
+  treeBox.innerHTML = "";
+  for (const id of ENTRIES) {
+    const node = methodNode(id, [id], 0);
+    treeBox.append(node);
+    open(node);
+  }
+}
+function visibleCall(c) {
+  return !hitsOnly.checked || c.h.length > 0 || c.t.some(t => reach.has(t[1]));
+}
+function nodeShell(rowKids, expandable, onOpen) {
+  const tg = h("span", {class: "tg"}, expandable ? "▸" : "•");
+  const row = h("div", {class: "row" + (expandable ? "" : " leaf")}, tg, rowKids);
+  const children = h("div", {class: "children"});
+  const node = h("div", {class: "node"}, row, children);
+  node._expandable = expandable;
+  node._onOpen = onOpen;
+  const toggle = () => { if (expandable) node.classList.contains("open") ? close(node) : open(node); };
+  tg.addEventListener("click", toggle);
+  row.querySelector(".lbl")?.addEventListener("click", toggle);
+  return node;
+}
+function open(node) {
+  if (!node._expandable) return;
+  if (!node._rendered) { node._onOpen(node.lastChild); node._rendered = true; }
+  node.classList.add("open");
+  node.firstChild.firstChild.textContent = "▾";
+}
+function close(node) {
+  node.classList.remove("open");
+  if (node._expandable) node.firstChild.firstChild.textContent = "▸";
+}
+function methodNode(id, anc) {
+  const node = nodeShell([h("span", {class: "lbl"}, M[id].s), h("span", {class: "loc"}, M[id].f || "")], true,
+      box => renderCalls(box, id, anc));
+  node._mid = id;
+  return node;
+}
+function renderCalls(box, mid, anc) {
+  let shown = 0;
+  callsOf(mid).forEach((c, ci) => {
+    if (!visibleCall(c)) return;
+    box.append(callNode(mid, ci, c, anc));
+    shown++;
+  });
+  if (!shown) box.append(h("div", {class: "muted", style: "padding:2px 4px"}, "(gösterilecek çağrı yok)"));
+}
+function callNode(mid, ci, c, anc) {
+  const hit = c.h.length > 0;
+  const single = c.sg && c.t.length === 1;
+  const tid = single ? c.t[0][1] : -1;
+  const recursive = single && anc.includes(tid);
+  const expandable = single ? M[tid].a && !recursive : c.t.length > 0;
+  const kids = [hit ? h("span", {style: "color:var(--hit)"}, "★") : null,
+      h("span", {class: "lbl"}, c.c), h("span", {class: "loc"}, loc(M[mid].f, c.l))];
+  if (c.e) kids.push(badge(c.e + (c.t.length ? "" : " · dinleyen yok"), "event"));
+  if (c.la) kids.push(badge("lambda"));
+  if (hit && !single) kids.push(...[...new Set(c.t.map(t => t[0]))].map(r => badge(r, "hit")));
+  if (recursive) kids.push(badge("↻ özyineleme"));
+  if (single && !M[tid].a) kids.push(badge("açılmadı"));
+  const node = nodeShell(kids, expandable, box => {
+    if (single) renderCalls(box, tid, anc.concat(tid));
+    else c.t.forEach(t => box.append(targetNode(t, anc)));
+  });
+  if (hit) node.firstChild.classList.add("hit");
+  node._mid = mid; node._ci = ci; node._single = single;
+  return node;
+}
+function targetNode([recv, tid], anc) {
+  const recursive = anc.includes(tid);
+  const label = sameClass(recv, tid) ? M[tid].s : recv + ": " + M[tid].s;
+  const kids = [h("span", {style: "color:var(--accent)"}, "⇒"), h("span", {class: "lbl"}, label)];
+  if (recursive) kids.push(badge("↻ özyineleme"));
+  if (!M[tid].a) kids.push(badge("açılmadı"));
+  const node = nodeShell(kids, M[tid].a && !recursive, box => renderCalls(box, tid, anc.concat(tid)));
+  node.firstChild.classList.add("target");
+  if (hitsOnly.checked && M[tid].a && !reach.has(tid)) node.firstChild.classList.add("dim");
+  node._tid = tid;
+  return node;
+}
+// Opens the tree along the shortest path to a method; returns the node whose children are that method's calls.
+function openPath(steps) {
+  let node = [...treeBox.children].find(n => n._mid === steps[0].id);
+  open(node);
+  for (let k = 1; k < steps.length; k++) {
+    const {id, ci} = steps[k];
+    let call = [...node.lastChild.children].find(n => n._ci === ci);
+    if (!call) return null;
+    open(call);
+    if (!call._single) {
+      call = [...call.lastChild.children].find(n => n._tid === id);
+      if (!call) return null;
+      open(call);
+    }
+    node = call;
+  }
+  return node;
+}
+function reveal(id, pick) {
+  show("agac");
+  const steps = pathTo(id);
+  if (!steps) return;
+  let node = openPath(steps);
+  if (!node && hitsOnly.checked) { hitsOnly.checked = false; rebuildTree(); node = openPath(steps); }
+  if (!node) return;
+  const target = pick ? [...node.lastChild.children].find(n => n._ci != null && pick(callsOf(n._mid)[n._ci])) : null;
+  flash((target || node).firstChild);
+}
+function revealMethod(id) { reveal(id, null); }
+// Opens the shortest path to every call of the target type (capped, so huge flows stay responsive).
+function openAllHits() {
+  const callers = [...new Set(F.map(f => f.by))].slice(0, 300);
+  for (const id of callers) { const steps = pathTo(id); if (steps) openPath(steps); }
+}
+function revealFinding(i) { reveal(F[i].by, c => c.h.includes(i)); }
+function flash(el) {
+  el.scrollIntoView({block: "center", behavior: "smooth"});
+  el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 2200);
+}
+
+// ------------------------------------------------------------------------------------------- acquire
+function renderAcquire(sec) {
+  const src = [A.acquirer, A.annotation ? "@" + A.annotation : null].filter(Boolean).join(", ");
+  const head = h("div", {class: "panel"}, h("h2", null, "Acquire edilenler (" + src + ")"));
+  if (!A.calls.length && !A.annotations.some(a => a.present)) {
+    head.append(h("p", {class: "badge warn"}, "Giriş metodunda acquire çağrısı ya da anotasyon bulunamadı; kullanılan tüm sınıflar eksik sayıldı."));
+  }
+  for (const a of A.annotations) {
+    head.append(h("div", null, a.present ? badge("VAR", "ok") : badge("YOK"), " @" + A.annotation + " ",
+        h("span", {class: "mono"}, a.m), h("span", {class: "muted"}, "  " + loc(a.f, a.l))), carList(a.cars));
+  }
+  for (const c of A.calls) {
+    head.append(h("div", null, badge("acquire()", "acc"), " ", h("span", {class: "mono"}, c.m),
+        h("span", {class: "muted"}, "  " + loc(c.f, c.l))), carList(c.cars));
+  }
+  head.append(h("div", null, h("span", {class: "muted"}, "Toplam: "),
+      A.acquired.length ? A.acquired.map(c => badge(c, "ok")) : "-"));
+  sec.append(head);
+  category(sec, "bad", "Eksik — akışta kesin olarak çağrılıyor ama acquire edilmemiş", A.missing);
+  category(sec, "warn", "Olası eksik — yalnızca arayüz üzerinden çağrılıyor olabilir, acquire edilmemiş", A.possiblyMissing);
+  category(sec, "info", "Belirsiz — sınıfı belirlenemeyen bir eleman bu sınıf olabilir (" + A.unresolved.join(", ") + ")", A.undecided);
+  if (A.unused.length) sec.append(h("div", {class: "panel cat warn"}, h("h2", null, "Acquire edilip akışta kullanılmayan"),
+      A.unused.map(c => badge(c, "warn"))));
+  category(sec, "ok", "Acquire edilmiş ve kullanılıyor", A.covered);
+  if (A.other.length) {
+    const p = h("div", {class: "panel cat"}, h("h2", null, "Bilgi: akıştaki diğer acquire çağrıları (karşılaştırmaya dahil değil)"));
+    for (const c of A.other) p.append(h("div", null, h("span", {class: "mono"}, c.m), h("span", {class: "muted"}, "  " + loc(c.f, c.l))), carList(c.cars));
+    sec.append(p);
+  }
+}
+function carList(cars) {
+  return h("ul", null, cars.map(c => h("li", null, c.cls ? h("b", null, c.cls) : badge("?", "warn"), h("span", {class: "muted"}, "  ← " + c.origin))));
+}
+function category(sec, cls, title, usages) {
+  if (!usages.length) return;
+  const p = h("div", {class: "panel cat " + cls}, h("h2", null, title + " (" + usages.length + ")"));
+  for (const u of usages) {
+    const sites = [...u.certain.map(i => [i, true]), ...u.possible.map(i => [i, false])];
+    p.append(h("div", {class: "usage"}, h("span", {class: "cls"}, u.cls), h("span", {class: "muted"}, "  " + u.q),
+        h("ul", null, sites.map(([i, certain]) => h("li", null,
+            h("button", {class: "link mono", onclick: () => showFinding(i)}, F[i].c), "  ",
+            h("span", {class: "muted"}, M[F[i].by].s + "  " + loc(F[i].f, F[i].l)),
+            certain ? null : badge("arayüz üzerinden", "warn"), " ",
+            h("button", {class: "link", onclick: () => revealFinding(i)}, "ağaçta göster"))))));
+  }
+  sec.append(p);
+}
+
+// -------------------------------------------------------------------------------------------- events
+function renderEvents(sec) {
+  const byName = new Map();
+  for (const r of D.events.registrations) {
+    const k = r.name == null ? "(ad bilinmiyor: her event)" : r.name;
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(r);
+  }
+  const reg = h("table", null, h("tr", null, h("th", null, "Event adı"), h("th", null, "Observer"), h("th", null, "Kayıt yeri")));
+  [...byName.keys()].sort().forEach(k => byName.get(k).forEach((r, i) => reg.append(h("tr", null,
+      h("td", null, i === 0 ? badge(k, "event") : ""), h("td", null, h("b", null, r.observer)),
+      h("td", {class: "muted mono"}, r.in + "  " + loc(r.f, r.l))))));
+  sec.append(h("div", {class: "panel"}, h("h2", null, "Kayıtlı observer'lar (" + D.events.registrations.length + ")"), reg));
+
+  const RES = {BY_NAME: ["event adına kayıtlı observer'lar", "ok"],
+               BY_TYPE: ["ad eşleşmedi; handle parametre tipine göre", "warn"],
+               ALL: ["event belirlenemedi; tüm observer'lar", "hit"]};
+  const p = h("div", {class: "panel"}, h("h2", null, "Akışta yayınlanan event'ler"));
+  if (!D.events.dispatches.length) p.append(h("p", {class: "muted"}, "Akışta event yayınlanmadı."));
+  D.events.dispatches.forEach((d, i) => {
+    const res = RES[d.res];
+    p.append(h("div", {class: "usage"},
+        h("b", null, "E" + (i + 1) + " "), h("span", {class: "mono"}, M[d.by].s), h("span", {class: "muted"}, "  " + loc(d.f, d.l) + "  " + d.dm), " ",
+        h("button", {class: "link", onclick: () => reveal(d.by, c => c.e && c.l === d.l)}, "ağaçta göster"),
+        h("div", null, h("span", {class: "muted"}, "Event: "), d.cls.length ? d.cls.join(", ") : "?", " ",
+            d.names.map(n => badge(n, "event")), " ", badge(res[0], res[1])),
+        h("ul", null, d.obs.length ? d.obs.map(id => h("li", {class: "mono"}, "⇒ " + M[id].s))
+            : h("li", {class: "muted"}, "(dinleyen observer yok)"))));
+  });
+  sec.append(p);
+}
+
+show(A && A.missing.length ? "acquire" : "ozet");
+</script>
+</body>
+</html>

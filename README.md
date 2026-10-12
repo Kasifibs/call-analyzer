@@ -57,7 +57,8 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--event-handle-method <ad>` | Observer'ın event'i alan metodu (varsayılan `handle`). |
 | `--config <dosya>` | Seçenekleri bir ayar dosyasından oku (bkz. aşağıda). |
 | `--tree` | Gezilen çağrı ağacını da yazdır. |
-| `--format text\|json` | Çıktı biçimi. JSON, CI kontrolleri ya da başka araçlarla işlemek için. |
+| `--format text\|json\|html` | Çıktı biçimi. JSON, CI kontrolleri ya da başka araçlarla işlemek için; HTML, tarayıcıda gezilebilen rapor (bkz. aşağıda). |
+| `--open` | Raporu yazdıktan sonra varsayılan tarayıcıda/uygulamada açar (`-o` ile). |
 | `-o <dosya>` | Çıktıyı dosyaya yaz. |
 
 ## Örnek
@@ -109,6 +110,29 @@ App#main(String[])
 ```
 
 Raporun sonunda, uygulama sınıfı bazında hangi metotların kaç yerden çağrılabildiğini gösteren bir özet de vardır.
+
+## HTML raporu (`--format html`)
+
+Akışı tarayıcıda tıklayarak takip etmek için:
+
+```bat
+java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --config ayar.properties --entry "com.example.RentalService#rent" --format html -o rapor.html --open
+```
+
+Tek bir `.html` dosyası üretilir; internet bağlantısı ya da dış kaynak (CDN vb.) gerekmez, dosyayı paylaşabilirsiniz.
+Sekmeler:
+
+- **Özet**: sayılar, uyarılar, uygulama sınıfı bazında hangi metotların çağrıldığı.
+- **Bulgular**: aranabilir/filtrelenebilir tablo. Bir satıra tıklayınca çağrı zinciri (event geçişleri dahil) açılır;
+  "Ağaçta göster" o çağrıyı çağrı ağacında açıp vurgular.
+- **Çağrı ağacı**: tıkladıkça açılan ağaç. Varsayılan olarak yalnızca hedef tipe (`ICar`) giden dallar gösterilir;
+  "Hedef çağrılarını aç" tüm bu yolları açar, metot araması bulunan metoda giden yolu açar. Event ile devam eden
+  çağrılar mor etiketle, özyineleme `↻` ile işaretlenir.
+- **Acquire** (`--acquirer` / `--acquire-annotation` ile): eksik, olası eksik, belirsiz ve kullanılmayan sınıflar;
+  her çağrı yerinden bulguya ya da ağaca gidilebilir.
+- **Eventler** (`--event-*` ile): kayıtlı observer'lar ve akışta yayınlanan event'ler.
+
+Büyük akışlarda da hızlıdır (17.000 metotluk bir akışın raporu ~20 MB, tarayıcıda 1 saniyenin altında açılır).
 
 ## Acquire listesi karşılaştırması (`--acquirer`)
 
