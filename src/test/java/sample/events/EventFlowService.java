@@ -11,8 +11,8 @@ public class EventFlowService {
         dispatcher.dispatch(new CarRentedEvent(bmw));
     }
 
-    public void returnByName() {
-        dispatcher.dispatch(new NamedEvent("CAR_RETURNED"));
+    public void maintenance() {
+        dispatcher.dispatch(new NamedEvent("MAINTENANCE"));
     }
 
     public void pay() {
@@ -37,5 +37,17 @@ public class EventFlowService {
 
     public void noListener() {
         dispatcher.dispatch(new NamedEvent("NOBODY_LISTENS"));
+    }
+
+    public void changeTyre() {
+        dispatcher.dispatch(new TyreChangedEvent());
+    }
+
+    public void urgentTyre() {
+        dispatcher.dispatch(new UrgentTyreChangedEvent());
+    }
+
+    public void spareTyre() {
+        dispatcher.dispatch(new SpareTyreEvent());
     }
 }

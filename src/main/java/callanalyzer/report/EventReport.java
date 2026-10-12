@@ -24,8 +24,7 @@ public final class EventReport {
         out.println("=== Event akisi ===");
         Map<String, TreeSet<String>> byName = new TreeMap<>();
         for (Registration r : result.eventRegistrations()) {
-            byName.computeIfAbsent(r.eventName() == null ? "(ad bilinmiyor: her event)" : r.eventName(),
-                    k -> new TreeSet<>()).add(MethodRef.simpleName(r.observerClass()));
+            byName.computeIfAbsent(key(r), k -> new TreeSet<>()).add(MethodRef.simpleName(r.observerClass()));
         }
         out.println("Kayitli observer'lar (" + result.eventRegistrations().size() + " kayit):");
         byName.forEach((name, observers) -> out.println("    " + pad(name, 24) + " -> " + String.join(", ", observers)));
@@ -49,12 +48,19 @@ public final class EventReport {
         out.flush();
     }
 
+    static String key(Registration r) {
+        if (r.eventName() != null) {
+            return r.eventName();
+        }
+        return r.eventType() != null ? "tip: " + MethodRef.simpleName(r.eventType()) : "(ad bilinmiyor)";
+    }
+
     private static String resolutionText(EventDispatch e) {
         return switch (e.resolution()) {
             case BY_NAME -> "event adina kayitli observer'lar";
-            case BY_TYPE -> (e.eventNames().isEmpty() ? "event adi bulunamadi" : "bu ada kayitli observer yok")
-                    + "; handle parametre tipi event'i kabul eden observer'lar";
-            case ALL -> "event belirlenemedi; tum observer'lar (ihtiyatli)";
+            case BY_TYPE -> (e.eventNames().isEmpty() ? "" : "bu ada kayitli observer yok; ")
+                    + "event tipini dinleyen observer'lar (addObserver / handle parametre tipi)";
+            case ALL -> "event belirlenemedi; kayitli tum observer'lar (ihtiyatli)";
         };
     }
 
@@ -63,6 +69,7 @@ public final class EventReport {
         m.put("registrations", result.eventRegistrations().stream().map(r -> {
             Map<String, Object> rm = new LinkedHashMap<>();
             rm.put("eventName", r.eventName());
+            rm.put("eventType", r.eventType() == null ? null : MethodRef.toDottedName(r.eventType()));
             rm.put("observer", MethodRef.toDottedName(r.observerClass()));
             rm.put("registeredIn", r.registeredIn().toQualifiedString());
             rm.put("sourceFile", r.sourceFile());

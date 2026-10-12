@@ -12,6 +12,11 @@ public class EventDispatcher {
         observers.computeIfAbsent(eventName, k -> new ArrayList<>()).add(observer);
     }
 
+    /** Registration without a name: the dispatcher keys the observer by the event type it handles. */
+    public void addObserver(IObserver<? extends Event> observer) {
+        observers.computeIfAbsent(observer.getClass().getName(), k -> new ArrayList<>()).add(observer);
+    }
+
     public void unregister(String eventName, IObserver<? extends Event> observer) {
         observers.getOrDefault(eventName, new ArrayList<>()).remove(observer);
     }

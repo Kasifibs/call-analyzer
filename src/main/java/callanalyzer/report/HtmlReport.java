@@ -195,6 +195,7 @@ public final class HtmlReport {
         m.put("registrations", result.eventRegistrations().stream().map(r -> {
             Map<String, Object> rm = new LinkedHashMap<>();
             rm.put("name", r.eventName());
+            rm.put("type", r.eventType() == null ? null : MethodRef.simpleName(r.eventType()));
             rm.put("observer", MethodRef.simpleName(r.observerClass()));
             rm.put("in", r.registeredIn().toShortString());
             rm.put("f", r.sourceFile());

@@ -422,19 +422,19 @@ function category(sec, cls, title, usages) {
 function renderEvents(sec) {
   const byName = new Map();
   for (const r of D.events.registrations) {
-    const k = r.name == null ? "(ad bilinmiyor: her event)" : r.name;
+    const k = r.name != null ? r.name : r.type ? "tip: " + r.type : "(ad bilinmiyor)";
     if (!byName.has(k)) byName.set(k, []);
     byName.get(k).push(r);
   }
-  const reg = h("table", null, h("tr", null, h("th", null, "Event adı"), h("th", null, "Observer"), h("th", null, "Kayıt yeri")));
+  const reg = h("table", null, h("tr", null, h("th", null, "Event adı / tipi"), h("th", null, "Observer"), h("th", null, "Kayıt yeri")));
   [...byName.keys()].sort().forEach(k => byName.get(k).forEach((r, i) => reg.append(h("tr", null,
       h("td", null, i === 0 ? badge(k, "event") : ""), h("td", null, h("b", null, r.observer)),
       h("td", {class: "muted mono"}, r.in + "  " + loc(r.f, r.l))))));
   sec.append(h("div", {class: "panel"}, h("h2", null, "Kayıtlı observer'lar (" + D.events.registrations.length + ")"), reg));
 
   const RES = {BY_NAME: ["event adına kayıtlı observer'lar", "ok"],
-               BY_TYPE: ["ad eşleşmedi; handle parametre tipine göre", "warn"],
-               ALL: ["event belirlenemedi; tüm observer'lar", "hit"]};
+               BY_TYPE: ["event tipini dinleyen observer'lar", "ok"],
+               ALL: ["event belirlenemedi; kayıtlı tüm observer'lar", "hit"]};
   const p = h("div", {class: "panel"}, h("h2", null, "Akışta yayınlanan event'ler"));
   if (!D.events.dispatches.length) p.append(h("p", {class: "muted"}, "Akışta event yayınlanmadı."));
   D.events.dispatches.forEach((d, i) => {

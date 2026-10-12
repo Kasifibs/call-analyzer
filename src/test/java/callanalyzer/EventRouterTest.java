@@ -53,8 +53,10 @@ class EventRouterTest {
         List<Registration> regs = analyze("rent", true).eventRegistrations();
         assertEquals(List.of("AUDIT AuditObserver", "CAR_RENTED CarRentedObserver",
                         "CAR_RENTED KafkaCarRentedObserver", "CAR_RETURNED CarReturnedObserver",
-                        "PAYMENT_DONE PaymentObserver"),
-                regs.stream().map(r -> r.eventName() + " " + MethodRef.simpleName(r.observerClass())).sorted().toList());
+                        "MAINTENANCE MaintenanceObserver", "PAYMENT_DONE PaymentObserver",
+                        "tip:SpareTyreEvent SpareTyreObserver", "tip:TyreChangedEvent TyreObserver"),
+                regs.stream().map(r -> (r.eventName() != null ? r.eventName() : "tip:" + MethodRef.simpleName(r.eventType()))
+                        + " " + MethodRef.simpleName(r.observerClass())).sorted().toList());
     }
 
     @Test
@@ -94,9 +96,9 @@ class EventRouterTest {
 
     @Test
     void eventNameFromConstructorArgumentAtTheNewSite() {
-        EventDispatch e = analyze("returnByName", true).events().get(0);
-        assertEquals(List.of("CAR_RETURNED"), e.eventNames());
-        assertEquals(List.of("CarReturnedObserver"), observers(e));
+        EventDispatch e = analyze("maintenance", true).events().get(0);
+        assertEquals(List.of("MAINTENANCE"), e.eventNames());
+        assertEquals(List.of("MaintenanceObserver"), observers(e));
     }
 
     @Test
@@ -115,14 +117,45 @@ class EventRouterTest {
     }
 
     @Test
-    void fallsBackToHandleParameterTypeWhenNameIsUnknown() {
+    void unknownNameIsDecidedByTheHandleParameterType() {
         EventDispatch dynamic = analyze("dynamicName", true).events().get(0);
         assertEquals(Resolution.BY_TYPE, dynamic.resolution());
-        assertEquals(List.of("AuditObserver"), observers(dynamic)); // only handle(Event) accepts a NamedEvent
+        // only observers whose handle accepts a NamedEvent: handle(Event) and handle(NamedEvent)
+        assertEquals(List.of("AuditObserver", "MaintenanceObserver"), observers(dynamic));
 
         EventDispatch unregistered = analyze("noListener", true).events().get(0);
-        assertEquals(Resolution.BY_TYPE, unregistered.resolution());
         assertEquals(List.of("NOBODY_LISTENS"), unregistered.eventNames());
+        assertEquals(List.of(), observers(unregistered));
+    }
+
+    @Test
+    void observersRegisteredWithoutANameAreMatchedByTheirEventType() {
+        EventDispatch tyre = analyze("changeTyre", true).events().get(0);
+        assertEquals(Resolution.BY_TYPE, tyre.resolution());
+        assertEquals(List.of("TyreObserver"), observers(tyre));
+
+        // the type comes from the generic signature: SpareTyreObserver extends BaseHandler<SpareTyreEvent>
+        assertEquals(List.of("SpareTyreObserver"), observers(analyze("spareTyre", true).events().get(0)));
+    }
+
+    @Test
+    void observersRegisteredWithoutANameDoNotLeakIntoOtherFlows() {
+        AnalysisResult r = analyze("rent", true);
+        assertFalse(reached(r, "TyreObserver"));
+        assertFalse(reached(r, "SpareTyreObserver"));
+        assertTrue(r.events().stream().allMatch(e -> e.observers().stream()
+                .noneMatch(t -> t.receiverClass().contains("Tyre"))));
+    }
+
+    @Test
+    void exactOrAssignableTypeMatching() {
+        assertEquals(List.of(), observers(analyze("urgentTyre", true).events().get(0)));
+        EventConfig assignable = new EventConfig("sample.events.Event", "sample.events.EventDispatcher",
+                "sample.events.IObserver", null, false);
+        AnalysisResult r = new CallGraphAnalyzer(Fixtures.hierarchy(), new AnalysisOptions()
+                .entry("sample.events.EventFlowService#urgentTyre").target("sample.cars.ICar").events(assignable),
+                Fixtures.classBytes()).analyze();
+        assertEquals(List.of("TyreObserver"), observers(r.events().get(0)));
     }
 
     @Test
@@ -130,6 +163,6 @@ class EventRouterTest {
         EventDispatch e = analyze("unknownEvent", true).events().get(0);
         assertEquals(Resolution.ALL, e.resolution());
         assertEquals(List.of("AuditObserver", "CarRentedObserver", "CarReturnedObserver", "KafkaCarRentedObserver",
-                "PaymentObserver"), observers(e));
+                "MaintenanceObserver", "PaymentObserver", "SpareTyreObserver", "TyreObserver"), observers(e));
     }
 }

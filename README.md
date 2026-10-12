@@ -55,6 +55,7 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--fail-on-missing` | Karşılaştırmada kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
 | `--event-class`, `--event-dispatcher`, `--event-observer` | Event takibi (bkz. aşağıda). Üçü birlikte verilir. |
 | `--event-handle-method <ad>` | Observer'ın event'i alan metodu (varsayılan `handle`). |
+| `--event-match exact\|assignable` | `addObserver(this)` ile kaydolan `IObserver<AEvent>` yalnızca `AEvent`'i mi (varsayılan) yoksa alt sınıflarını da mı alır. |
 | `--scan` | `--entry` yerine: acquire eden tüm metotları bulup her birini analiz eder (bkz. aşağıda). |
 | `--config <dosya>` | Seçenekleri bir ayar dosyasından oku (bkz. aşağıda). |
 | `--tree` | Gezilen çağrı ağacını da yazdır. |
@@ -304,21 +305,27 @@ java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --cp uygulamam.jar --entry "com.e
 Event ayarı olmadan araç `dispatcher.dispatch(event)` içindeki `observer.handle(event)` çağrısında **tüm**
 `IObserver` uygulamalarına iner. Event ayarıyla:
 
-1. Sınıf yolundaki tüm `register(...)` çağrıları taranır ve hangi event adına hangi observer'ın kayıtlı olduğu
-   çıkarılır (`dispatcher.register("CAR_RENTED", this)`; ad bir sabit ya da `static final` alan olabilir; kayıt
-   kurucuda ya da `init`/`@PostConstruct` gibi bir metotta yapılabilir; `unregister`/`remove...` sayılmaz).
-2. Akışta bir `dispatch(event)` görüldüğünde event'in sınıfı ve adı bulunur:
-   - `super("CAR_RENTED")` / `super(NAME)` ile kurucuda verilen ad,
-   - `new NamedEvent("CAR_RETURNED")` gibi oluşturulduğu yerde verilen ad,
-   - sabit dönen bir `getName()` override'ı,
-   - event bir yardımcı metoda parametre olarak geçiyorsa (`publish(Event e)`), akıştaki çağıranları.
-3. Akış yalnızca o ada kayıtlı observer'ların `handle` metoduna devam eder (generic `IObserver<T>` için derleyicinin
-   ürettiği köprü metot değil, `handle(CarRentedEvent)` seçilir). Observer'ın içinde yayınlanan event'ler (inner
-   event) de aynı şekilde takip edilir.
+1. Sınıf yolundaki tüm kayıt çağrıları taranır (EventDispatcher'ın `IObserver` parametresi alan, adı `un`/`remove`
+   ile başlamayan metotları: `addObserver`, `register`, `subscribe`, ...):
+   - **Adsız kayıt** (`dispatcher.addObserver(this)`): observer, dinlediği event **tipine** göre kaydedilir. Tip,
+     `IObserver<ADomainEvent>` → `handle(ADomainEvent)` parametresinden; handle generic bir taban sınıftaysa
+     (`AHandler extends BaseHandler<ADomainEvent>`) sınıfın generic imzasından okunur.
+   - **Adlı kayıt** (`dispatcher.register("CAR_RENTED", this)`): observer o **ada** kaydedilir (ad bir sabit ya da
+     `static final` alan olmalı). Ad çözülemezse observer "adı bilinmiyor" olarak kaydedilir ve uyarı verilir.
+2. Akışta bir `dispatch(event)` görüldüğünde event'in sınıfı (ve varsa adı: `super("CAR_RENTED")`, `new X("ad")`,
+   sabit dönen `getName()`; üst sınıf constructor zinciri takip edilir) veri akışıyla bulunur. Event bir yardımcı
+   metoda parametre olarak geçiyorsa (`publish(DomainEvent e)`) akıştaki çağıranlara bakılır.
+3. Akış yalnızca o event'e kayıtlı observer'ların `handle` metoduna devam eder:
+   - adsız kayıtlarda `IObserver<T>` tipi event sınıfıyla eşleşenler (`--event-match exact`, varsayılan:
+     `IObserver<AEvent>` yalnızca `AEvent` alır; `assignable`: alt sınıflarını da alır),
+   - adlı kayıtlarda o ada kayıtlı olanlar,
+   - `handle(T)` parametresi event'i kabul etmeyen observer **hiçbir durumda** seçilmez (gerçekte
+     `ClassCastException` olurdu); adı bilinmeyen kayıtlar da bu kontrolden geçer.
+   Observer'ın içinde yayınlanan event'ler (inner event) de aynı şekilde takip edilir.
 
-Ad bulunamazsa (ör. çalışma anında hesaplanıyorsa) `handle` parametre tipi event sınıfını kabul eden observer'lara,
-event hakkında hiçbir şey bilinmiyorsa (ör. giriş metodunun parametresi) tüm observer'lara gidilir; raporda bu
-"Secim" satırında belirtilir.
+Event'in sınıfı hiç belirlenemiyorsa (ör. giriş metodunun parametresi) **kayıtlı** tüm observer'lara gidilir; raporda
+bu "Secim" satırında belirtilir. Kaydı hiç bulunamayan observer'lar hiçbir event'te tetiklenmez sayılır ve uyarı olarak
+listelenir.
 
 Çıktıda bulguların zincirinde event geçişleri görünür, ayrıca bir event bölümü eklenir:
 

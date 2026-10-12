@@ -42,13 +42,15 @@ import java.util.TreeSet;
  * <p>Without it, {@code dispatcher.dispatch(event)} leads (through {@code observer.handle(event)} inside the
  * dispatcher) to every observer of the application. The router instead:
  * <ol>
- *   <li>scans all loaded classes for register calls ({@code dispatcher.register("CAR_RENTED", this)}) and builds an
- *       event name &rarr; observer table;</li>
+ *   <li>scans all loaded classes for register calls and builds the registration table. A call with an event name
+ *       ({@code register("CAR_RENTED", this)}) registers the observer for that name; a call without one
+ *       ({@code addObserver(this)}) registers it for the event type it handles, taken from {@code IObserver<AEvent>}
+ *       (the parameter of its {@code handle} method, or the generic signature of the class);</li>
  *   <li>at a dispatch call, finds the class and name of the published event (constants passed to the event's
  *       constructor or to {@code super(...)}, {@code getName()} overrides returning a constant, ...);</li>
- *   <li>continues the flow only into the {@code handle} methods of the observers registered for that name. If the name
- *       cannot be found it falls back to the observers whose {@code handle} parameter accepts the event class, and if
- *       nothing is known about the event, to all observers.</li>
+ *   <li>continues the flow only into the observers registered for that name or that type. An observer whose
+ *       {@code handle} parameter cannot accept the event class is never selected. If nothing is known about the event,
+ *       every registered observer is selected.</li>
  * </ol>
  */
 public final class EventRouter {
@@ -62,6 +64,9 @@ public final class EventRouter {
 
     private final Map<String, Set<String>> observersByName = new TreeMap<>();
     private final Set<String> observersForAnyName = new TreeSet<>();
+    /** Observers registered without a name, and the event type each one handles. */
+    private final Map<String, String> observerTypes = new TreeMap<>();
+    private final boolean exactTypeMatch;
     private final List<Registration> registrations = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
 
@@ -72,6 +77,7 @@ public final class EventRouter {
         this.dispatcherClass = hierarchy.resolveClassName(config.dispatcherClass());
         this.observerClass = hierarchy.resolveClassName(config.observerClass());
         this.handleMethod = config.handleMethod();
+        this.exactTypeMatch = config.exactTypeMatch();
         for (String[] t : new String[][]{{eventClass, "--event-class"}, {dispatcherClass, "--event-dispatcher"},
                 {observerClass, "--event-observer"}}) {
             if (!hierarchy.contains(t[0])) {
@@ -79,6 +85,19 @@ public final class EventRouter {
             }
         }
         buildRegistry();
+        Set<String> unregistered = concreteObservers();
+        unregistered.removeAll(registeredObservers());
+        if (!registrations.isEmpty() && !unregistered.isEmpty()) {
+            warnings.add("Kaydi bulunamayan observer'lar (hicbir event'te tetiklenmez sayildi): "
+                    + String.join(", ", unregistered.stream().map(MethodRef::simpleName).toList()));
+        }
+    }
+
+    private Set<String> registeredObservers() {
+        Set<String> all = new TreeSet<>(observersForAnyName);
+        observersByName.values().forEach(all::addAll);
+        all.addAll(observerTypes.keySet());
+        return all;
     }
 
     public List<Registration> registrations() {
@@ -203,12 +222,22 @@ public final class EventRouter {
                     + flow.sourceFile() + ":" + line + ")");
             return;
         }
+        boolean hasName = false;
+        for (Type t : types) {
+            hasName |= isNameType(t);
+        }
         for (String observer : observers) {
+            if (!hasName) {
+                // addObserver(this): the dispatcher keys the observer by the event type it handles
+                String type = observedType(observer);
+                observerTypes.put(observer, type);
+                registrations.add(new Registration(null, type, observer, flow.method(), flow.sourceFile(), line));
+                continue;
+            }
             Set<String> names = new TreeSet<>();
-            boolean unknown = true;
+            boolean unknown = false;
             for (int i = 0; i < types.length; i++) {
                 if (isNameType(types[i])) {
-                    unknown = false;
                     Set<String> found = namesFor(flow, args.get(i), observer, nameResolver);
                     if (found.isEmpty()) {
                         unknown = true;
@@ -218,17 +247,47 @@ public final class EventRouter {
             }
             for (String name : names) {
                 observersByName.computeIfAbsent(name, k -> new TreeSet<>()).add(observer);
-                registrations.add(new Registration(name, observer, flow.method(), flow.sourceFile(), line));
+                registrations.add(new Registration(name, null, observer, flow.method(), flow.sourceFile(), line));
             }
             if (unknown) {
                 observersForAnyName.add(observer);
-                registrations.add(new Registration(null, observer, flow.method(), flow.sourceFile(), line));
+                registrations.add(new Registration(null, null, observer, flow.method(), flow.sourceFile(), line));
                 warnings.add("Event adi bulunamadi, " + MethodRef.simpleName(observer)
-                        + " her event icin tetiklenebilir sayildi: " + flow.method().toShortString() + " ("
-                        + flow.sourceFile() + ":" + line + ")");
+                        + " handle parametresinin kabul ettigi her event'te tetiklenebilir sayildi: "
+                        + flow.method().toShortString() + " (" + flow.sourceFile() + ":" + line + ")");
             }
         }
     }
+
+    /**
+     * The event type an observer handles: the parameter of its {@code handle} method if it is more specific than the
+     * base event class, otherwise the type argument in the generic signature of the class or one of its superclasses
+     * ({@code class AHandler extends BaseHandler<AEvent>}), otherwise the base event class itself.
+     */
+    String observedType(String observer) {
+        String param = handleOf(observer, Set.of())
+                .map(m -> Type.getArgumentTypes(m.ref().desc())[0].getInternalName()).orElse(null);
+        if (param != null && !param.equals(eventClass) && hierarchy.isSubtypeOf(param, eventClass)) {
+            return param;
+        }
+        for (String c = observer; c != null && hierarchy.contains(c); c = hierarchy.get(c).superName()) {
+            String signature = repo.classNode(c).map(cn -> cn.signature).orElse(null);
+            if (signature == null) {
+                continue;
+            }
+            java.util.regex.Matcher m = GENERIC_SUPERTYPE.matcher(signature);
+            while (m.find()) {
+                if (hierarchy.isSubtypeOf(m.group(1), observerClass) && hierarchy.isSubtypeOf(m.group(2), eventClass)) {
+                    return m.group(2);
+                }
+            }
+        }
+        return eventClass;
+    }
+
+    /** {@code Lcom/x/IObserver<Lcom/x/AEvent;>} in a class signature. */
+    private static final java.util.regex.Pattern GENERIC_SUPERTYPE =
+            java.util.regex.Pattern.compile("L([\\w/$]+)<L([\\w/$]+);>");
 
     /**
      * Constant names a register argument can have. A call on {@code this} (e.g. {@code getEventName()} in an abstract
@@ -282,25 +341,31 @@ public final class EventRouter {
 
         Set<String> registeredNames = new TreeSet<>(names);
         registeredNames.retainAll(observersByName.keySet());
+        boolean registryEmpty = registrations.isEmpty();
         Set<String> observers = new TreeSet<>();
         Resolution resolution;
-        if (!registeredNames.isEmpty()) {
-            resolution = Resolution.BY_NAME;
-            registeredNames.forEach(n -> observers.addAll(observersByName.get(n)));
-            observers.addAll(observersForAnyName);
-        } else if (!eventClasses.isEmpty() && !unknownEvent) {
-            resolution = Resolution.BY_TYPE;
-            for (String o : concreteObservers()) {
-                Type param = handleOf(o, eventClasses).map(m -> Type.getArgumentTypes(m.ref().desc())[0]).orElse(null);
-                if (param == null || eventClasses.stream()
-                        .anyMatch(e -> hierarchy.isSubtypeOf(e, param.getInternalName()))) {
-                    observers.add(o);
-                }
-            }
-            observers.addAll(observersForAnyName);
-        } else {
+        if (eventClasses.isEmpty() || unknownEvent && registeredNames.isEmpty()) {
+            // Nothing (reliable) is known about the event: every observer that is registered at all.
             resolution = Resolution.ALL;
-            observers.addAll(concreteObservers());
+            observers.addAll(registryEmpty ? concreteObservers() : registeredObservers());
+        } else {
+            resolution = registeredNames.isEmpty() ? Resolution.BY_TYPE : Resolution.BY_NAME;
+            if (!names.isEmpty()) {
+                registeredNames.forEach(n -> observers.addAll(observersByName.get(n)));
+            } else {
+                observersByName.values().forEach(observers::addAll); // name unknown: the type check below decides
+            }
+            observerTypes.forEach((observer, type) -> {
+                if (eventClasses.stream().anyMatch(e -> typeMatches(e, type))) {
+                    observers.add(observer);
+                }
+            });
+            observers.addAll(observersForAnyName);
+            if (registryEmpty) {
+                observers.addAll(concreteObservers());
+            }
+            // An observer whose handle(T) cannot take the event would fail with a ClassCastException: never selected.
+            observers.removeIf(o -> eventClasses.stream().noneMatch(e -> handleAccepts(o, e)));
         }
 
         List<DispatchTarget> targets = new ArrayList<>();
@@ -378,6 +443,11 @@ public final class EventRouter {
      */
     private Set<String> namesFromConstructor(MethodDataFlow ctor, MethodDataFlow actualsFlow, List<TrackedValue> actuals,
                                              ValueResolver nameResolver) {
+        return namesFromConstructor(ctor, actualsFlow, actuals, nameResolver, 0);
+    }
+
+    private Set<String> namesFromConstructor(MethodDataFlow ctor, MethodDataFlow actualsFlow, List<TrackedValue> actuals,
+                                             ValueResolver nameResolver, int depth) {
         Set<String> names = new TreeSet<>();
         for (AbstractInsnNode insn : ctor.instructions()) {
             if (!(insn instanceof MethodInsnNode call) || call.getOpcode() != Opcodes.INVOKESPECIAL
@@ -390,6 +460,7 @@ public final class EventRouter {
             }
             Type[] types = Type.getArgumentTypes(call.desc);
             List<TrackedValue> args = ctor.arguments(call);
+            Set<String> here = new TreeSet<>();
             for (int i = 0; i < Math.min(types.length, args.size()); i++) {
                 if (!types[i].getDescriptor().equals("Ljava/lang/String;")) {
                     continue;
@@ -397,12 +468,20 @@ public final class EventRouter {
                 for (ValueSource src : args.get(i).sources()) {
                     int param = src instanceof Parameter p ? ctor.parameterIndex(p.local()) : -1;
                     if (param >= 0 && actuals != null && param < actuals.size()) {
-                        constants(nameResolver.resolve(actualsFlow, actuals.get(param)), names);
+                        constants(nameResolver.resolve(actualsFlow, actuals.get(param)), here);
                     } else if (param < 0 || actuals == null) {
-                        constants(nameResolver.resolve(ctor, single(src)), names);
+                        constants(nameResolver.resolve(ctor, single(src)), here);
                     }
                 }
             }
+            if (here.isEmpty() && depth < 5 && !call.owner.equals("java/lang/Object")) {
+                // e.g. UrgentTyreChangedEvent() -> TyreChangedEvent() -> super("TYRE_CHANGED"): follow the chain
+                MethodDataFlow callee = repo.flow(new MethodRef(call.owner, call.name, call.desc)).orElse(null);
+                if (callee != null) {
+                    here.addAll(namesFromConstructor(callee, ctor, args, nameResolver, depth + 1));
+                }
+            }
+            names.addAll(here);
         }
         return names;
     }
@@ -430,6 +509,19 @@ public final class EventRouter {
     }
 
     // ------------------------------------------------------------------------------------------------ helpers
+
+    private boolean typeMatches(String event, String observedType) {
+        if (observedType.equals(eventClass)) {
+            return true; // IObserver<Event>: receives every event
+        }
+        return exactTypeMatch ? event.equals(observedType) : hierarchy.isSubtypeOf(event, observedType);
+    }
+
+    private boolean handleAccepts(String observer, String event) {
+        return handleOf(observer, Set.of(event))
+                .map(m -> hierarchy.isSubtypeOf(event, Type.getArgumentTypes(m.ref().desc())[0].getInternalName()))
+                .orElse(false);
+    }
 
     private Set<String> concreteObservers() {
         Set<String> result = new TreeSet<>();
