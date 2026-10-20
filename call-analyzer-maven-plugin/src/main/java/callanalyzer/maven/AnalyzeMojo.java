@@ -30,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -120,6 +121,13 @@ public class AnalyzeMojo extends AbstractMojo {
     /** Put the project's runtime dependencies on the analysis class path. */
     @Parameter(defaultValue = "true")
     private boolean includeDependencies;
+
+    /**
+     * Warn when a flow calls a class of the {@link #includes} packages that is not on the class path. With
+     * {@link #includeDependencies} off this is summarised in one line; {@code false} logs it only at debug level.
+     */
+    @Parameter(property = "callanalyzer.warnMissingClasses", defaultValue = "true")
+    private boolean warnMissingClasses;
 
     /** What to analyse; by default the project's jar, or its class directory if no jar has been built. */
     @Parameter
@@ -230,13 +238,29 @@ public class AnalyzeMojo extends AbstractMojo {
 
         Files.createDirectories(reportDirectory.toPath());
         HtmlScanReport html = htmlReport ? new HtmlScanReport(reportDirectory.toPath().resolve("tarama.html")) : null;
+        // Without dependencies every flow into another module reaches a missing class, so one summary line is
+        // enough; the per-method details stay available with mvn -X.
+        boolean warnEach = warnMissingClasses && includeDependencies;
+        Set<MethodRef> leavingClassPath = new HashSet<>();
         ScanResult result = scanner.run(candidates, getLog()::debug, (item, analysis) -> {
             if (html != null) {
                 html.writeMethodPage(item, analysis);
             }
-            analysis.warnings().stream().filter(w -> w.contains("OLMAYAN")).distinct()
-                    .forEach(w -> getLog().warn(item.candidate().method().toShortString() + ": " + w));
+            analysis.warnings().stream().filter(w -> w.contains("OLMAYAN")).distinct().forEach(w -> {
+                String line = item.candidate().method().toShortString() + ": " + w;
+                if (warnEach) {
+                    getLog().warn(line);
+                } else {
+                    getLog().debug(line);
+                }
+                leavingClassPath.add(item.candidate().method());
+            });
         });
+        if (warnMissingClasses && !includeDependencies && !leavingClassPath.isEmpty()) {
+            getLog().warn("call-analyzer: " + leavingClassPath.size() + " metotta akis sinif yolunda olmayan"
+                    + " siniflara geciyor (includeDependencies=false), iclerine girilmedi. Ayrintilar icin mvn -X;"
+                    + " bu uyariyi kapatmak icin <warnMissingClasses>false</warnMissingClasses>.");
+        }
         if (html != null) {
             html.writeIndex(result);
         }

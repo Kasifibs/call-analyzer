@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.example.it</groupId>
+        <artifactId>no-deps-quiet</artifactId>
+        <version>1.0</version>
+    </parent>
+    <artifactId>app</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.example.it</groupId>
+            <artifactId>domain</artifactId>
+            <version>1.0</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>@project.groupId@</groupId>
+                <artifactId>@project.artifactId@</artifactId>
+                <version>@project.version@</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>analyze</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <includeDependencies>false</includeDependencies>
+                    <warnMissingClasses>false</warnMissingClasses>
+                    <targets>
+                        <target>com.example.domain.ICar</target>
+                    </targets>
+                    <acquirer>com.example.domain.CarAcquirer#acquire</acquirer>
+                    <includes>
+                        <include>com.example</include>
+                    </includes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

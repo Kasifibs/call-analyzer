@@ -549,7 +549,8 @@ Tüm ayarlar:
 | `maxDepth`, `directOnly`, `onlyInterfaceMethods`, `skipInternal`, `includeConstructors` | | Komut satırındaki karşılıklarıyla aynı. |
 | `failOnMissing` | `true` | Kesin eksikte build'i başarısız yap (`-Dcallanalyzer.failOnMissing`). |
 | `failOnPossiblyMissing` | `false` | Olası eksikte de başarısız yap. |
-| `includeDependencies` | `true` | Bağımlılıkları sınıf yoluna ekle. |
+| `includeDependencies` | `true` | Bağımlılıkları sınıf yoluna ekle. `false` ile yalnızca projenin kendi jar'ı okunur (çok daha hızlı), ama akışın başka modüllere geçen kısımları takip edilmez. |
+| `warnMissingClasses` | `true` | Akış, `includes` paketlerinde olup sınıf yolunda bulunmayan bir sınıfa geçince uyar. `includeDependencies=false` iken metot başına değil tek satırlık özet olarak yazılır; `false` ile yalnızca `mvn -X` çıktısında görünür (`-Dcallanalyzer.warnMissingClasses`). |
 | `analyzedFile` | proje jar'ı | Başka bir jar/dizini analiz etmek için. |
 | `reportDirectory` | `target/call-analyzer` | |
 | `htmlReport` | `true` | HTML raporu da yaz. |
@@ -567,4 +568,4 @@ mvn verify
 
 Analiz kütüphanesinin birim testlerine ek olarak, plugin `call-analyzer-maven-plugin/src/it/` altındaki örnek
 projeleri gerçekten derleyip plugin'i çalıştırır (biri geçen, biri kesin eksik nedeniyle başarısız olması beklenen
-çok modüllü bir proje).
+çok modüllü bir proje, ikisi de `includeDependencies=false` iken uyarıların özetlendiğini/kapatıldığını kontrol eden).
