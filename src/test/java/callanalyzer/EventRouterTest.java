@@ -165,4 +165,27 @@ class EventRouterTest {
         assertEquals(List.of("AuditObserver", "CarRentedObserver", "CarReturnedObserver", "KafkaCarRentedObserver",
                 "MaintenanceObserver", "PaymentObserver", "SpareTyreObserver", "TyreObserver"), observers(e));
     }
+
+    @Test
+    void eventsCollectedByAnAggregateOnlyCountWhenAddedInTheFlow() {
+        AnalysisResult r = analyze("aggregateLoop", true);
+        EventDispatch e = r.events().get(0);
+        // changeTyre() runs in the flow (through the record(..) helper), scrap() does not
+        assertEquals(List.of("TyreChangedEvent"), e.eventClasses().stream().map(MethodRef::simpleName).toList());
+        assertEquals(List.of("TyreObserver"), observers(e));
+        assertEquals(List.of("new TyreChangedEvent() (CarAggregate.java:11)"),
+                e.eventOrigins().get("sample/events/TyreChangedEvent"));
+        assertFalse(reached(r, "SpareTyreObserver"));
+    }
+
+    @Test
+    void methodReferenceAndLambdaDispatchUseTheElementsOfTheList() {
+        for (String method : List.of("aggregateMethodRef", "aggregateLambda")) {
+            AnalysisResult r = analyze(method, true);
+            EventDispatch e = r.events().get(0);
+            assertEquals(Resolution.BY_TYPE, e.resolution(), method);
+            assertEquals(List.of("TyreObserver"), observers(e), method);
+            assertFalse(reached(r, "SpareTyreObserver"), method);
+        }
+    }
 }

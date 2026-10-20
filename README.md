@@ -323,11 +323,36 @@ Event ayarı olmadan araç `dispatcher.dispatch(event)` içindeki `observer.hand
      `ClassCastException` olurdu); adı bilinmeyen kayıtlar da bu kontrolden geçer.
    Observer'ın içinde yayınlanan event'ler (inner event) de aynı şekilde takip edilir.
 
+Event'in nereden geldiği şu kalıplarda da bulunur:
+
+- `for (DomainEvent e : aggregate.pullEvents()) dispatcher.dispatch(e)`,
+  `aggregate.pullEvents().forEach(dispatcher::dispatch)` ya da `.forEach(e -> dispatcher.dispatch(e))`: event'ler
+  listenin elemanlarıdır. Bir alana (ör. aggregate'in `events` listesi) eklenen event'ler yalnızca **analiz edilen
+  akışta çalışan** metotlardan (ve constructor'lardan) toplanır: akışta `car.rent()` çağrılıyorsa `rent()`'in eklediği
+  event sayılır, hiç çağrılmayan `scrap()`'in eklediği sayılmaz.
+- Event'ler yönlendirilmeden önce akışın geri kalanı incelenir (örn. `car.rent(); ...dispatch(...)` sırasında önce
+  `rent()`'in içi), yeni bulunan observer'ların içindeki event'ler için de tekrarlanır.
+
 Event'in sınıfı hiç belirlenemiyorsa (ör. giriş metodunun parametresi) **kayıtlı** tüm observer'lara gidilir; raporda
 bu "Secim" satırında belirtilir. Kaydı hiç bulunamayan observer'lar hiçbir event'te tetiklenmez sayılır ve uyarı olarak
 listelenir.
 
-Çıktıda bulguların zincirinde event geçişleri görünür, ayrıca bir event bölümü eklenir:
+Çıktıda bulguların zincirinde event geçişleri görünür, ayrıca bir event bölümü eklenir. Bölüm, akışta tespit edilen
+yayınlanmış event'lerin listesiyle başlar (hangi event, hangi `dispatch` satırında yayınlandığı ve event nesnesinin
+nerede oluşturulduğu; belirlenemeyenler en sonda `? (belirlenemedi)` olarak):
+
+```
+Akista yayinlanan event'ler (3 tip):
+    CarRentedEvent           E1  EventFlowService#rent()  (EventFlowService.java:12)
+                                 <- new CarRentedEvent() (EventFlowService.java:12)
+    TyreChangedEvent         E2  EventFlowService#aggregateMethodRef()  (EventFlowService.java:64)
+                                 <- new TyreChangedEvent() (CarAggregate.java:11)
+    ? (belirlenemedi)        E3  EventFlowService#unknownEvent(Event)  (EventFlowService.java:32)
+                                 <- EventFlowService#unknownEvent(Event) metodunun 1. parametresi 'event'
+```
+
+HTML raporunda da Özet sekmesinde yayınlanan event'ler, Eventler sekmesinde aynı liste "ağaçta göster"
+bağlantılarıyla bulunur. Bölümün devamı:
 
 ```
 [4] Tesla#charge()  ->  Tesla

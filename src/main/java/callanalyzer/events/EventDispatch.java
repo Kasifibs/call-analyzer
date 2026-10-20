@@ -4,6 +4,7 @@ import callanalyzer.analysis.ClassHierarchy.DispatchTarget;
 import callanalyzer.model.MethodRef;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * An event published in the analysed flow, and the observers the flow continues into.
@@ -14,11 +15,14 @@ import java.util.List;
  * @param dispatchMethod the dispatcher method called
  * @param eventClasses   classes the published event can be (internal names)
  * @param eventNames     event names the published event can have
+ * @param eventOrigins   per event class (internal name, {@code "?"} for objects whose class is unknown): where the
+ *                       published objects come from, e.g. {@code new BDomainEvent() (Car.java:33)}
  * @param resolution     how the observers were selected
  * @param observers      the observers' handle methods the flow continues into
  */
 public record EventDispatch(MethodRef caller, String sourceFile, int line, MethodRef dispatchMethod,
-                            List<String> eventClasses, List<String> eventNames, Resolution resolution,
+                            List<String> eventClasses, List<String> eventNames, Map<String, List<String>> eventOrigins,
+                            Resolution resolution,
                             List<DispatchTarget> observers) {
 
     public enum Resolution {

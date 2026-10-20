@@ -25,6 +25,10 @@ public sealed interface ValueSource {
     record This() implements ValueSource {
     }
 
+    /** The function object created at instruction {@code insn} by {@code invokedynamic} (a lambda or method reference). */
+    record LambdaValue(int insn) implements ValueSource {
+    }
+
     /** A constant loaded with {@code LDC}: a {@link String} or a class literal ({@link org.objectweb.asm.Type}). */
     record Constant(Object value) implements ValueSource {
     }

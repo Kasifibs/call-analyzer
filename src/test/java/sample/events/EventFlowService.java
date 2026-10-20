@@ -5,6 +5,7 @@ import sample.cars.Bmw;
 public class EventFlowService {
     private EventDispatcher dispatcher;
     private Bmw bmw;
+    private final CarAggregate aggregate = new CarAggregate();
 
     public void rent() {
         bmw.openSunroof();
@@ -49,5 +50,22 @@ public class EventFlowService {
 
     public void spareTyre() {
         dispatcher.dispatch(new SpareTyreEvent());
+    }
+
+    public void aggregateLoop() {
+        aggregate.changeTyre();
+        for (Event event : aggregate.pullEvents()) {
+            dispatcher.dispatch(event);
+        }
+    }
+
+    public void aggregateMethodRef() {
+        aggregate.changeTyre();
+        aggregate.pullEvents().forEach(dispatcher::dispatch);
+    }
+
+    public void aggregateLambda() {
+        aggregate.changeTyre();
+        aggregate.pullEvents().stream().filter(e -> e != null).forEach(e -> dispatcher.dispatch(e));
     }
 }

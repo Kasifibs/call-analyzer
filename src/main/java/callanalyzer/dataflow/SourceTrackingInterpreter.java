@@ -3,6 +3,7 @@ package callanalyzer.dataflow;
 import callanalyzer.dataflow.ValueSource.CallResult;
 import callanalyzer.dataflow.ValueSource.Constant;
 import callanalyzer.dataflow.ValueSource.FieldValue;
+import callanalyzer.dataflow.ValueSource.LambdaValue;
 import callanalyzer.dataflow.ValueSource.NewObject;
 import callanalyzer.dataflow.ValueSource.Parameter;
 import callanalyzer.dataflow.ValueSource.This;
@@ -12,6 +13,7 @@ import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.TypeInsnNode;
@@ -115,6 +117,9 @@ final class SourceTrackingInterpreter extends Interpreter<TrackedValue> {
         BasicValue b = basic.naryOperation(insn, values.stream().map(SourceTrackingInterpreter::unwrap).toList());
         if (insn instanceof MethodInsnNode m) {
             return of(b, new CallResult(instructions.indexOf(insn), new MethodRef(m.owner, m.name, m.desc)));
+        }
+        if (insn instanceof InvokeDynamicInsnNode) {
+            return of(b, new LambdaValue(instructions.indexOf(insn)));
         }
         return of(b);
     }

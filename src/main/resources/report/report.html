@@ -31,7 +31,7 @@ function h(tag, props, ...kids) {
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
     else e.setAttribute(k, v === true ? "" : v);
   }
-  for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : String(kid));
+  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : String(kid));
   return e;
 }
 const loc = (f, l) => (f || "?") + (l > 0 ? ":" + l : "");
@@ -112,7 +112,12 @@ function renderSummary(sec) {
     cards.append(card(A.missing.length, "Kesin eksik", A.missing.length ? "bad" : "good"));
     cards.append(card(A.possiblyMissing.length, "Olası eksik", A.possiblyMissing.length ? "warn" : ""));
   }
-  if (D.meta.events) cards.append(card(D.events.dispatches.length, "Yayınlanan event"));
+  if (D.meta.events) {
+    const pub = publishedEvents();
+    const types = [...pub.keys()].filter(k => k !== "?").length;
+    cards.append(card(types, "Yayınlanan event tipi" + (pub.has("?") ? " (+" + pub.get("?").length + " belirlenemeyen)" : ""),
+        pub.has("?") ? "warn" : ""));
+  }
   sec.append(cards);
 
   const info = h("div", {class: "panel"}, h("h2", null, "Analiz"));
@@ -121,6 +126,12 @@ function renderSummary(sec) {
   for (const t of D.meta.targets) {
     grid.append(h("span", {class: "muted"}, "Hedef tip"),
         h("span", null, h("code", null, t.name), " ", t.impls.map(i => badge(i, "acc"))));
+  }
+  if (D.meta.events) {
+    const pub = publishedEvents();
+    grid.append(h("span", {class: "muted"}, "Yayınlanan event'ler"),
+        h("span", null, pub.size ? [...pub.keys()].map(k => k === "?" ? badge("belirlenemeyen: " + pub.get(k).length, "warn")
+            : badge(k, "event")) : "-", " ", h("button", {class: "link", onclick: () => show("event")}, "ayrıntı")));
   }
   info.append(grid);
   sec.append(info);
@@ -419,7 +430,29 @@ function category(sec, cls, title, usages) {
 }
 
 // -------------------------------------------------------------------------------------------- events
+function publishedEvents() {
+  const map = new Map();
+  D.events.dispatches.forEach((d, i) => {
+    const keys = d.res === "ALL" || !d.cls.length ? ["?"] : [];
+    for (const k of keys.concat(d.cls)) { if (!map.has(k)) map.set(k, []); map.get(k).push(i); }
+  });
+  return new Map([...map].sort((a, b) => a[0] === "?" ? 1 : b[0] === "?" ? -1 : a[0].localeCompare(b[0])));
+}
 function renderEvents(sec) {
+  const pub = publishedEvents();
+  const pt = h("table", null, h("tr", null, h("th", null, "Event"), h("th", null, "Yayınlandığı yer"), h("th", null, "Nereden geliyor")));
+  for (const [cls, ids] of pub) ids.forEach((i, k) => {
+    const d = D.events.dispatches[i];
+    pt.append(h("tr", null,
+        h("td", null, k === 0 ? (cls === "?" ? badge("belirlenemedi", "hit") : h("b", null, cls)) : ""),
+        h("td", null, h("b", null, "E" + (i + 1) + " "), h("span", {class: "mono"}, M[d.by].s),
+            h("span", {class: "muted"}, "  " + loc(d.f, d.l) + " "),
+            h("button", {class: "link", onclick: () => reveal(d.by, c => c.e && c.l === d.l)}, "ağaçta göster")),
+        h("td", {class: "muted"}, (d.origins[cls] || []).map(o => h("div", null, o)))));
+  });
+  sec.append(h("div", {class: "panel"}, h("h2", null, "Akışta yayınlanan event'ler (" + [...pub.keys()].filter(k => k !== "?").length + " tip)"),
+      pub.size ? pt : h("p", {class: "muted"}, "Akışta event yayınlanmıyor.")));
+
   const byName = new Map();
   for (const r of D.events.registrations) {
     const k = r.name != null ? r.name : r.type ? "tip: " + r.type : "(ad bilinmiyor)";
@@ -435,7 +468,7 @@ function renderEvents(sec) {
   const RES = {BY_NAME: ["event adına kayıtlı observer'lar", "ok"],
                BY_TYPE: ["event tipini dinleyen observer'lar", "ok"],
                ALL: ["event belirlenemedi; kayıtlı tüm observer'lar", "hit"]};
-  const p = h("div", {class: "panel"}, h("h2", null, "Akışta yayınlanan event'ler"));
+  const p = h("div", {class: "panel"}, h("h2", null, "Yayın noktaları (ayrıntı)"));
   if (!D.events.dispatches.length) p.append(h("p", {class: "muted"}, "Akışta event yayınlanmadı."));
   D.events.dispatches.forEach((d, i) => {
     const res = RES[d.res];
@@ -444,7 +477,10 @@ function renderEvents(sec) {
         h("button", {class: "link", onclick: () => reveal(d.by, c => c.e && c.l === d.l)}, "ağaçta göster"),
         h("div", null, h("span", {class: "muted"}, "Event: "), d.cls.length ? d.cls.join(", ") : "?", " ",
             d.names.map(n => badge(n, "event")), " ", badge(res[0], res[1])),
-        h("ul", null, d.obs.length ? d.obs.map(id => h("li", {class: "mono"}, "⇒ " + M[id].s))
+        Object.entries(d.origins).map(([cls, list]) => list.map(o => h("div", {class: "muted"},
+            "Kaynak: " + (cls === "?" ? "" : cls + " ← ") + o))),
+        h("ul", null, d.obs.length ? d.obs.map(([recv, id]) => h("li", {class: "mono"},
+            "⇒ " + (sameClass(recv, id) ? M[id].s : recv + ": " + M[id].s)))
             : h("li", {class: "muted"}, "(dinleyen observer yok)"))));
   });
   sec.append(p);

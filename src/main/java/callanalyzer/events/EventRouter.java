@@ -24,6 +24,7 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.analysis.BasicValue;
@@ -320,11 +321,22 @@ public final class EventRouter {
         MethodDataFlow flow = repo.flow(caller).orElse(null);
         Set<String> eventClasses = new TreeSet<>();
         Set<String> names = new TreeSet<>();
+        Map<String, Set<String>> origins = new TreeMap<>();
         boolean unknownEvent = flow == null;
         if (flow != null) {
             ValueResolver eventResolver =
                     new ValueResolver(hierarchy, repo, t -> hierarchy.isSubtypeOf(t, eventClass), callers);
             ValueResolver nameResolver = new ValueResolver(hierarchy, repo, "java/lang/String"::equals, callers);
+            if (site.viaLambda()) {
+                // events.forEach(dispatcher::dispatch): the events are the elements the method reference is applied to
+                List<InvokeDynamicInsnNode> refs = BytecodeRepository.indyInsns(flow, site.target(), site.line());
+                unknownEvent |= refs.isEmpty();
+                for (InvokeDynamicInsnNode ref : refs) {
+                    Set<Resolved> elements = eventResolver.elementsPassedTo(flow, ref);
+                    unknownEvent |= elements.isEmpty();
+                    unknownEvent |= addResolved(elements, nameResolver, eventClasses, names, origins);
+                }
+            }
             for (MethodInsnNode call : BytecodeRepository.callInsns(flow, site.target(), site.line())) {
                 List<TrackedValue> args = flow.arguments(call);
                 Type[] types = Type.getArgumentTypes(call.desc);
@@ -333,7 +345,7 @@ public final class EventRouter {
                         constants(nameResolver.resolve(flow, args.get(i)), names); // dispatch("CAR_RENTED", event)
                     } else if (isEventType(types[i])) {
                         unknownEvent |= describeEvent(flow, args.get(i), eventResolver, nameResolver,
-                                eventClasses, names);
+                                eventClasses, names, origins);
                     }
                 }
             }
@@ -375,13 +387,15 @@ public final class EventRouter {
         ClassInfo callerClass = hierarchy.get(caller.owner());
         return new EventDispatch(caller, callerClass == null ? null : callerClass.sourceFile(), site.line(),
                 site.target(), List.copyOf(eventClasses),
-                List.copyOf(resolution == Resolution.BY_NAME ? registeredNames : names), resolution,
+                List.copyOf(resolution == Resolution.BY_NAME ? registeredNames : names), frozen(origins),
+                resolution,
                 List.copyOf(targets));
     }
 
     /** Adds the classes and names an event argument can have; returns {@code true} if its class is unknown. */
     private boolean describeEvent(MethodDataFlow flow, TrackedValue event, ValueResolver eventResolver,
-                                  ValueResolver nameResolver, Set<String> classes, Set<String> names) {
+                                  ValueResolver nameResolver, Set<String> classes, Set<String> names,
+                                  Map<String, Set<String>> origins) {
         boolean unknown = false;
         for (ValueSource src : event.sources()) {
             if (src instanceof NewObject n) {
@@ -389,15 +403,38 @@ public final class EventRouter {
                 classes.add(n.type());
                 names.addAll(namesFromNewSite(flow, n, nameResolver));
                 names.addAll(constantGetterNames(n.type()));
+                int line = flow.lineOf(flow.insn(n.insn()));
+                origin(origins, n.type(), "new " + MethodRef.simpleName(n.type()) + "() (" + flow.sourceFile()
+                        + (line > 0 ? ":" + line : "") + ")");
                 continue;
             }
-            for (Resolved r : eventResolver.resolve(flow, single(src))) {
-                if (r.concreteClass() != null) {
-                    classes.add(r.concreteClass());
-                    names.addAll(namesOfClass(r.concreteClass(), nameResolver));
-                } else {
-                    unknown = true;
-                }
+            unknown |= addResolved(eventResolver.resolve(flow, single(src)), nameResolver, classes, names, origins);
+        }
+        return unknown;
+    }
+
+    private static Map<String, List<String>> frozen(Map<String, Set<String>> origins) {
+        Map<String, List<String>> result = new java.util.LinkedHashMap<>();
+        origins.forEach((k, v) -> result.put(k, List.copyOf(v)));
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    private static void origin(Map<String, Set<String>> origins, String cls, String origin) {
+        origins.computeIfAbsent(cls, k -> new java.util.LinkedHashSet<>()).add(origin);
+    }
+
+    /** Adds resolved event objects; returns {@code true} if one of them has an unknown class. */
+    private boolean addResolved(Set<Resolved> resolved, ValueResolver nameResolver, Set<String> classes,
+                                Set<String> names, Map<String, Set<String>> origins) {
+        boolean unknown = false;
+        for (Resolved r : resolved) {
+            if (r.concreteClass() != null) {
+                classes.add(r.concreteClass());
+                names.addAll(namesOfClass(r.concreteClass(), nameResolver));
+                origin(origins, r.concreteClass(), r.origin());
+            } else {
+                unknown = true;
+                origin(origins, "?", r.origin());
             }
         }
         return unknown;

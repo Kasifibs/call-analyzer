@@ -210,8 +210,12 @@ public final class HtmlReport {
             em.put("dm", e.dispatchMethod().toShortString());
             em.put("cls", e.eventClasses().stream().map(MethodRef::simpleName).toList());
             em.put("names", e.eventNames());
+            Map<String, Object> origins = new LinkedHashMap<>();
+            e.eventOrigins().forEach((cls, list) -> origins.put(cls.equals("?") ? "?" : MethodRef.simpleName(cls), list));
+            em.put("origins", origins);
             em.put("res", e.resolution().name());
-            em.put("obs", e.observers().stream().map(t -> id(t.method())).toList());
+            em.put("obs", e.observers().stream()
+                    .map(t -> List.of(MethodRef.simpleName(t.receiverClass()), id(t.method()))).toList());
             return (Object) em;
         }).toList());
         return m;

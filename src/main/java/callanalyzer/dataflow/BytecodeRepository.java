@@ -3,10 +3,12 @@ package callanalyzer.dataflow;
 import callanalyzer.model.InvokeKind;
 import callanalyzer.model.MethodRef;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
@@ -63,6 +65,23 @@ public final class BytecodeRepository {
             case Opcodes.INVOKEINTERFACE -> InvokeKind.INTERFACE;
             default -> InvokeKind.VIRTUAL;
         };
+    }
+
+    /**
+     * {@code invokedynamic} instructions in {@code flow} creating a lambda / method reference whose implementation is
+     * {@code target}, optionally only on {@code line} (ignored if negative).
+     */
+    public static List<InvokeDynamicInsnNode> indyInsns(MethodDataFlow flow, MethodRef target, int line) {
+        List<InvokeDynamicInsnNode> found = new ArrayList<>();
+        for (AbstractInsnNode insn : flow.instructions()) {
+            if (insn instanceof InvokeDynamicInsnNode indy && indy.bsmArgs.length >= 2
+                    && indy.bsmArgs[1] instanceof Handle h && h.getOwner().equals(target.owner())
+                    && h.getName().equals(target.name()) && h.getDesc().equals(target.desc())
+                    && (line < 0 || flow.lineOf(indy) == line)) {
+                found.add(indy);
+            }
+        }
+        return found;
     }
 
     /** Instructions in {@code flow} calling {@code target}, optionally only on {@code line} (ignored if negative). */

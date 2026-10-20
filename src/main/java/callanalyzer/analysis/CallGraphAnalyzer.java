@@ -130,13 +130,11 @@ public final class CallGraphAnalyzer {
                 edges.put(current, out);
                 for (CallSite site : info.calls()) {
                     List<DispatchTarget> dispatch;
-                    String via = null;
                     if (router != null && router.isDispatchCall(site)) {
-                        // Only the observers registered for the published event, not every observer.
-                        EventDispatch ev = router.route(current, site, callers);
-                        events.put(List.of(current, out.size()), ev);
-                        dispatch = ev.observers();
-                        via = ev.label();
+                        // Routed once the rest of the flow is known (below): which events were added to an aggregate's
+                        // list, for example, depends on methods that have not been analysed yet at this point.
+                        events.put(List.of(current, out.size()), null);
+                        dispatch = List.of();
                     } else {
                         dispatch = hierarchy.dispatch(site);
                     }
@@ -144,25 +142,26 @@ public final class CallGraphAnalyzer {
                     for (String target : targets) {
                         match(current, depth, site, dispatch, target).ifPresent(found::add);
                     }
-                    enqueue(current, site, dispatch, depth, via, depths, parents, queue);
+                    enqueue(current, site, dispatch, depth, null, depths, parents, queue);
                 }
             }
             if (router == null || events.isEmpty() || round >= MAX_EVENT_ROUNDS) {
                 break;
             }
-            // Methods reached later may have revealed more callers (and so more events) for an earlier dispatch.
+            // Route the dispatch calls now that the flow reached so far is known; methods reached through the selected
+            // observers may reveal more (callers, events added to lists), so repeat until nothing changes.
             boolean changed = false;
-            for (Map.Entry<List<Object>, EventDispatch> e : events.entrySet()) {
+            for (Map.Entry<List<Object>, EventDispatch> e : new ArrayList<>(events.entrySet())) {
                 MethodRef caller = (MethodRef) e.getKey().get(0);
                 int index = (Integer) e.getKey().get(1);
                 CallEdge old = edges.get(caller).get(index);
                 EventDispatch ev = router.route(caller, old.site(), callers);
                 if (ev.observers().equals(old.targets())) {
-                    e.setValue(ev);
+                    events.put(e.getKey(), ev);
                     continue;
                 }
                 changed = true;
-                e.setValue(ev);
+                events.put(e.getKey(), ev);
                 edges.get(caller).set(index, new CallEdge(caller, old.site(), ev.observers()));
                 found.removeIf(f -> f.caller().equals(caller) && f.site().equals(old.site()));
                 for (String target : targets) {
@@ -172,6 +171,13 @@ public final class CallGraphAnalyzer {
             }
             if (!changed) {
                 break;
+            }
+        }
+
+        for (Map.Entry<List<Object>, EventDispatch> e : events.entrySet()) {
+            if (e.getValue() == null) { // only if the round limit stopped the traversal early
+                CallEdge edge = edges.get((MethodRef) e.getKey().get(0)).get((Integer) e.getKey().get(1));
+                e.setValue(router.route(edge.caller(), edge.site(), callers));
             }
         }
 

@@ -17,6 +17,7 @@ import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
@@ -56,9 +57,27 @@ public final class ValueResolver {
     public record CallerSite(MethodDataFlow flow, MethodInsnNode call) {
     }
 
-    /** Supplies the call sites invoking a method, used to resolve parameters. */
+    /** An {@code invokedynamic} instruction creating a lambda or method reference. */
+    public record LambdaSite(MethodDataFlow flow, InvokeDynamicInsnNode indy) {
+    }
+
+    /** What the resolver knows about the analysed flow. */
     public interface CallerLookup {
+        /** The call sites invoking {@code callee}, used to resolve parameters. */
         List<CallerSite> callersOf(MethodRef callee);
+
+        /** The {@code invokedynamic} sites creating the lambda whose body is {@code lambdaBody}. */
+        default List<LambdaSite> lambdaSitesOf(MethodRef lambdaBody) {
+            return List.of();
+        }
+
+        /**
+         * Whether {@code method} runs in the analysed flow. Elements added to a field's collection (or values stored
+         * into a field) only count if they happen in such a method, or in a constructor / static initializer.
+         */
+        default boolean inScope(MethodRef method) {
+            return true;
+        }
     }
 
     private static final int MAX_DEPTH = 10;
@@ -80,22 +99,81 @@ public final class ValueResolver {
         this.callers = callers;
     }
 
-    /** Callers taken from the call graph edges explored so far (lambda/method-reference edges are skipped). */
+    /**
+     * Callers taken from the call graph edges explored so far; the methods of those edges are the flow's scope.
+     * Lambda bodies are resolved through the {@code invokedynamic} sites creating them.
+     */
     public static CallerLookup callersFromEdges(Map<MethodRef, List<CallEdge>> edges, BytecodeRepository repo) {
-        return callee -> {
-            List<CallerSite> sites = new ArrayList<>();
-            for (Map.Entry<MethodRef, List<CallEdge>> e : edges.entrySet()) {
-                for (CallEdge edge : e.getValue()) {
-                    if (edge.site().viaLambda() || edge.targets().stream().noneMatch(t -> t.method().equals(callee))) {
-                        continue;
+        return new CallerLookup() {
+            @Override
+            public List<CallerSite> callersOf(MethodRef callee) {
+                List<CallerSite> sites = new ArrayList<>();
+                for (Map.Entry<MethodRef, List<CallEdge>> e : edges.entrySet()) {
+                    for (CallEdge edge : e.getValue()) {
+                        if (edge.site().viaLambda() || edge.targets().stream().noneMatch(t -> t.method().equals(callee))) {
+                            continue;
+                        }
+                        repo.flow(e.getKey()).ifPresent(flow -> BytecodeRepository
+                                .callInsns(flow, edge.site().target(), edge.site().line())
+                                .forEach(call -> sites.add(new CallerSite(flow, call))));
                     }
-                    repo.flow(e.getKey()).ifPresent(flow -> BytecodeRepository
-                            .callInsns(flow, edge.site().target(), edge.site().line())
-                            .forEach(call -> sites.add(new CallerSite(flow, call))));
+                }
+                return sites;
+            }
+
+            @Override
+            public List<LambdaSite> lambdaSitesOf(MethodRef lambdaBody) {
+                List<LambdaSite> sites = new ArrayList<>();
+                for (Map.Entry<MethodRef, List<CallEdge>> e : edges.entrySet()) {
+                    for (CallEdge edge : e.getValue()) {
+                        if (edge.site().viaLambda() && edge.site().target().equals(lambdaBody)) {
+                            repo.flow(e.getKey()).ifPresent(flow -> BytecodeRepository
+                                    .indyInsns(flow, lambdaBody, edge.site().line())
+                                    .forEach(indy -> sites.add(new LambdaSite(flow, indy))));
+                        }
+                    }
+                }
+                return sites;
+            }
+
+            @Override
+            public boolean inScope(MethodRef method) {
+                return edges.containsKey(method);
+            }
+        };
+    }
+
+    /**
+     * The objects a lambda / method reference created by {@code indy} is applied to: the elements of the collection,
+     * stream or optional it is handed to ({@code events.forEach(dispatcher::dispatch)},
+     * {@code events.stream().filter(..).forEach(e -> ..)}, {@code opt.ifPresent(..)}).
+     */
+    public Set<Resolved> elementsPassedTo(MethodDataFlow flow, InvokeDynamicInsnNode indy) {
+        return elementsPassedTo(flow, indy, 0);
+    }
+
+    private Set<Resolved> elementsPassedTo(MethodDataFlow flow, InvokeDynamicInsnNode indy, int depth) {
+        Set<Resolved> found = new LinkedHashSet<>();
+        ValueSource lambda = new ValueSource.LambdaValue(flow.indexOf(indy));
+        for (AbstractInsnNode insn : flow.instructions()) {
+            if (!(insn instanceof MethodInsnNode consumer)) {
+                continue;
+            }
+            List<TrackedValue> args = flow.arguments(consumer);
+            if (args.stream().noneMatch(a -> a.sources().contains(lambda))) {
+                continue;
+            }
+            TrackedValue receiver = flow.receiver(consumer);
+            if (receiver != null) {
+                found.addAll(resolveAny(flow, receiver, depth + 1));
+            }
+            for (TrackedValue a : args) {
+                if (!a.sources().contains(lambda)) {
+                    found.addAll(resolveAny(flow, a, depth + 1)); // static helpers: forEach(list, consumer)
                 }
             }
-            return sites;
-        };
+        }
+        return found;
     }
 
     /** Every element-typed object {@code value} may be, or contain (if it is a collection, array, ...). */
@@ -202,7 +280,11 @@ public final class ValueResolver {
             ClassNode owner = repo.classNode(f.owner()).orElse(null);
             if (owner != null) {
                 for (MethodNode m : owner.methods) {
-                    MethodDataFlow other = repo.flow(new MethodRef(owner.name, m.name, m.desc)).orElse(null);
+                    MethodRef ref = new MethodRef(owner.name, m.name, m.desc);
+                    if (!inScope(ref)) {
+                        continue; // e.g. scrap() adding ADomainEvent is not part of this flow
+                    }
+                    MethodDataFlow other = repo.flow(ref).orElse(null);
                     if (other != null && !other.method().equals(flow.method())) {
                         found.addAll(mutationsOf(other, src, depth + 1));
                     }
@@ -267,6 +349,18 @@ public final class ValueResolver {
                 found.addAll(resolveAny(caller.flow(), args.get(index), depth + 1));
             }
         }
+        // A lambda body's parameters are the captured values followed by the arguments of the functional method.
+        boolean instanceLambda = hierarchy.method(flow.method()).map(m -> !m.isStatic()).orElse(false);
+        int offset = instanceLambda ? 1 : 0; // a lambda using "this" captures it first, as its receiver
+        for (LambdaSite site : callers.lambdaSitesOf(flow.method())) {
+            int captured = Type.getArgumentTypes(site.indy().desc).length;
+            if (index + offset < captured) {
+                found.addAll(resolveAny(site.flow(), site.flow().stack(site.indy(), captured - 1 - index - offset),
+                        depth + 1));
+            } else {
+                found.addAll(elementsPassedTo(site.flow(), site.indy(), depth + 1));
+            }
+        }
         return found;
     }
 
@@ -281,7 +375,8 @@ public final class ValueResolver {
             return found;
         }
         for (MethodNode m : owner.methods) {
-            MethodDataFlow flow = repo.flow(new MethodRef(owner.name, m.name, m.desc)).orElse(null);
+            MethodRef ref = new MethodRef(owner.name, m.name, m.desc);
+            MethodDataFlow flow = inScope(ref) ? repo.flow(ref).orElse(null) : null;
             if (flow == null) {
                 continue;
             }
@@ -310,6 +405,11 @@ public final class ValueResolver {
         return bodies;
     }
 
+    /** Constructors and static initializers set objects up before any flow runs, so they are always in scope. */
+    private boolean inScope(MethodRef method) {
+        return method.isConstructor() || method.name().equals("<clinit>") || callers.inScope(method);
+    }
+
     private static String typeOf(MethodDataFlow flow, ValueSource src) {
         Type t;
         if (src instanceof NewObject n) {
@@ -322,6 +422,8 @@ public final class ValueResolver {
             t = Type.getType(p.desc());
         } else if (src instanceof Constant c) {
             t = Type.getObjectType(c.value() instanceof Type ? "java/lang/Class" : "java/lang/String");
+        } else if (src instanceof ValueSource.LambdaValue) {
+            return null;
         } else {
             t = Type.getObjectType(flow.method().owner());
         }

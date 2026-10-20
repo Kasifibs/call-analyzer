@@ -170,6 +170,27 @@ class MainTest {
     }
 
     @Test
+    void publishedEventsAreListedWithTheirOrigin() throws Exception {
+        String[] args = {"--cp", Fixtures.sampleClassesDir().toString(), "--target", "sample.cars.ICar",
+                "--entry", "sample.events.EventFlowService#aggregateMethodRef",
+                "--entry", "sample.events.EventFlowService#unknownEvent",
+                "--event-class", "sample.events.Event", "--event-dispatcher", "sample.events.EventDispatcher",
+                "--event-observer", "sample.events.IObserver"};
+        Run text = run(args);
+        assertEquals(0, text.exit(), text.err());
+        String out = text.out();
+        assertTrue(out.contains("Akista yayinlanan event'ler (1 tip):"), out);
+        assertTrue(out.contains("<- new TyreChangedEvent() (CarAggregate.java:11)"), out);
+        assertTrue(out.contains("? (belirlenemedi)"), out);
+        // the undetermined row comes last
+        assertTrue(out.indexOf("TyreChangedEvent ") < out.indexOf("? (belirlenemedi)"), out);
+
+        Run json = run(concat(args, "--format", "json"));
+        assertTrue(json.out().contains("\"published\": {"), json.out());
+        assertTrue(json.out().contains("\"sample.events.TyreChangedEvent\": ["), json.out());
+    }
+
+    @Test
     void eventOptionsMustBeGivenTogether() throws Exception {
         Run r = run("--cp", Fixtures.sampleClassesDir().toString(), "--entry", "sample.events.EventFlowService#rent",
                 "--target", "sample.cars.ICar", "--event-class", "sample.events.Event");
