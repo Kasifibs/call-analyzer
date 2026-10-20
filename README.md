@@ -19,9 +19,16 @@ ayrıştırmaya ve bağımlılıkları yapılandırmaya gerek kalmaz.
 
 ## Derleme
 
+Proje iki modülden oluşur:
+
+- `call-analyzer/`: analiz kütüphanesi ve komut satırı aracı,
+- `call-analyzer-maven-plugin/`: aynı analizi bir projenin build'i sırasında çalıştıran Maven plugin'i
+  (bkz. [Maven plugin'i](#maven-plugini)).
+
 ```bash
-mvn package
-# -> target/call-analyzer-1.0.0-SNAPSHOT-all.jar  (bağımlılıkları içeren çalıştırılabilir jar)
+mvn install
+# -> call-analyzer/target/call-analyzer-1.0.0-SNAPSHOT-all.jar  (bağımlılıkları içeren çalıştırılabilir jar)
+# -> plugin yerel Maven deposuna (~/.m2) kurulur
 ```
 
 Java 17+ gerekir.
@@ -31,7 +38,7 @@ Java 17+ gerekir.
 Önce analiz edilecek uygulamayı derleyin (`mvn compile` → `target/classes`), sonra:
 
 ```bash
-java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
+java -jar call-analyzer/target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
   --cp /yol/uygulama/target/classes \
   --entry 'com.example.App#main' \
   --target com.example.ICar \
@@ -465,8 +472,99 @@ Statik analiz olduğu için sonuçlar **ihtiyatlıdır** (fazlasını gösterebi
   lambda, `ICar::stop`) ise takip edilir.
 - Spring Boot fat-jar'ının içindeki iç içe jar'lar (`BOOT-INF/lib/*.jar`) okunmaz; bunları ayrıca `--cp` ile verin.
 
+## Maven plugin'i
+
+Analizi projenizin build'inin bir parçası yapar: jar oluştuktan sonra (`verify` fazında) projenizdeki acquire eden
+**tüm metotları** bulur (`--scan` ile aynı), her birinin akışını analiz eder ve **kesin eksik acquire olan bir metot
+varsa build'i başarısız yapar**.
+
+Önce plugin'i yerel Maven deponuza kurun (bu projenin kökünde `mvn install`; şirket içi bir Nexus/Artifactory'ye
+`mvn deploy` ile de konabilir). Sonra analiz edilecek projenin (çok modüllü ise uygulamayı paketleyen modülün)
+`pom.xml`'ine ekleyin:
+
+```xml
+<plugin>
+    <groupId>io.github.kasifibs</groupId>
+    <artifactId>call-analyzer-maven-plugin</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <executions>
+        <execution>
+            <goals>
+                <goal>analyze</goal>
+            </goals>
+        </execution>
+    </executions>
+    <configuration>
+        <targets>
+            <target>com.sirket.domain.ICar</target>
+        </targets>
+        <acquirer>com.sirket.domain.CarAcquirer#acquire</acquirer>
+        <acquireAnnotation>com.sirket.domain.AcquireCar</acquireAnnotation>
+        <includes>
+            <include>com.sirket</include>
+        </includes>
+        <!-- event takibi (istege bagli) -->
+        <eventClass>com.sirket.domain.DomainEvent</eventClass>
+        <eventDispatcher>com.sirket.application.DomainEventDispatcher</eventDispatcher>
+        <eventObserver>com.sirket.domain.IObserver</eventObserver>
+    </configuration>
+</plugin>
+```
+
+`mvn verify` (ya da `mvn install`) sırasında:
+
+```
+[INFO] --- call-analyzer:1.0.0-SNAPSHOT:analyze (default) @ app ---
+[INFO] call-analyzer: app-1.0.jar analiz ediliyor (1 bagimlilik sinif yolunda)
+[INFO] call-analyzer: acquire eden 1 metot bulundu
+[INFO] call-analyzer: 1 metot: 1 kesin eksik, 0 olasi eksik, 0 OK
+[ERROR]   [X] com.example.app.RentalService#rent()  kesin eksik: Tesla
+[INFO] call-analyzer raporu: .../app/target/call-analyzer/tarama.html
+[INFO] BUILD FAILURE
+[ERROR] Failed to execute goal io.github.kasifibs:call-analyzer-maven-plugin:1.0.0-SNAPSHOT:analyze (default) on project app:
+        call-analyzer: 1 metotta acquire edilmeden kullanilan sinif var (kesin eksik). Ayrintilar: .../tarama.html
+```
+
+- **Ne analiz edilir:** projenin ürettiği jar (yoksa `target/classes`). Projenin çalışma zamanı bağımlılıkları (çok
+  modüllü projede diğer modüller dahil) sınıf yoluna otomatik eklenir, akış onların içine de girer; ancak acquire
+  eden metotlar yalnızca **projenin kendi sınıflarında** aranır.
+- **Raporlar:** `target/call-analyzer/` altında `tarama.html` (+ `tarama_metotlar/` içinde metot başına sayfa),
+  `tarama.txt`, `tarama.json`.
+- **Build ne zaman başarısız olur:** kesin eksik varsa (`failOnMissing`, varsayılan `true`). Olası eksikler için de
+  başarısız olsun isterseniz `<failOnPossiblyMissing>true</failOnPossiblyMissing>`.
+- **Atlamak için:** `mvn verify -Dcallanalyzer.skip=true`; uyarı verip build'i geçirmek için
+  `-Dcallanalyzer.failOnMissing=false`.
+
+Tüm ayarlar:
+
+| Ayar | Varsayılan | Açıklama |
+|---|---|---|
+| `targets` | (zorunlu) | Uygulayıcıları aranan tip(ler), ör. `com.sirket.domain.ICar`. |
+| `acquirer` / `acquireAnnotation` | - | En az biri zorunlu. |
+| `includes` / `excludes` | - | Taranacak ve içine girilecek paketler. `includes` olarak kendi kök paketinizi vermeniz önerilir (hız). |
+| `eventClass`, `eventDispatcher`, `eventObserver` | - | Event takibi (üçü birlikte). |
+| `eventHandleMethod` | `handle` | |
+| `eventDetection` | `new` | `new` ya da `dispatch`. |
+| `eventMatch` | `exact` | `exact` ya da `assignable`. |
+| `maxDepth`, `directOnly`, `onlyInterfaceMethods`, `skipInternal`, `includeConstructors` | | Komut satırındaki karşılıklarıyla aynı. |
+| `failOnMissing` | `true` | Kesin eksikte build'i başarısız yap (`-Dcallanalyzer.failOnMissing`). |
+| `failOnPossiblyMissing` | `false` | Olası eksikte de başarısız yap. |
+| `includeDependencies` | `true` | Bağımlılıkları sınıf yoluna ekle. |
+| `analyzedFile` | proje jar'ı | Başka bir jar/dizini analiz etmek için. |
+| `reportDirectory` | `target/call-analyzer` | |
+| `htmlReport` | `true` | HTML raporu da yaz. |
+| `skip` | `false` | `-Dcallanalyzer.skip=true`. |
+
+Plugin pom'da tanımlıysa (ayarlar yukarıdaki gibi `<execution>` dışındaki `<configuration>`'da), build'in geri
+kalanını çalıştırmadan da çağrılabilir: `mvn package call-analyzer:analyze` (ya da tam adıyla
+`mvn package io.github.kasifibs:call-analyzer-maven-plugin:1.0.0-SNAPSHOT:analyze`).
+
 ## Testler
 
 ```bash
-mvn test
+mvn verify
 ```
+
+Analiz kütüphanesinin birim testlerine ek olarak, plugin `call-analyzer-maven-plugin/src/it/` altındaki örnek
+projeleri gerçekten derleyip plugin'i çalıştırır (biri geçen, biri kesin eksik nedeniyle başarısız olması beklenen
+çok modüllü bir proje).
