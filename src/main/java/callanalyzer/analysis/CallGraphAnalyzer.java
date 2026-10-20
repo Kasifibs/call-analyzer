@@ -187,12 +187,48 @@ public final class CallGraphAnalyzer {
                         f.matchedTargets(), f.receiverTypeMatches(), f.interfaceMethod(), f.internalCall(),
                         chainTo(f.caller(), parents)))
                 .toList();
+        warnMissingClasses(entries, edges, warnings);
         Map<MethodRef, List<CallEdge>> frozenEdges = new LinkedHashMap<>();
         edges.forEach((k, v) -> frozenEdges.put(k, List.copyOf(v)));
         return new AnalysisResult(List.copyOf(entries), List.copyOf(targets), findings,
                 Collections.unmodifiableMap(frozenEdges), Collections.unmodifiableMap(depths), hierarchy,
                 List.copyOf(warnings), List.copyOf(events.values()),
                 router == null ? List.of() : router.registrations());
+    }
+
+    /**
+     * Calls into application classes that are not on the class path cannot be followed, which silently cuts the flow
+     * short (typically a module jar missing from --cp). Report them: classes in the --include packages, or, without
+     * --include, in the same top-level package (first two segments) as an entry class.
+     */
+    private void warnMissingClasses(Set<MethodRef> entries, Map<MethodRef, List<CallEdge>> edges, List<String> warnings) {
+        Set<String> roots = new java.util.TreeSet<>();
+        for (MethodRef e : entries) {
+            String[] parts = e.owner().split("/");
+            if (parts.length > 2) {
+                roots.add(parts[0] + "/" + parts[1] + "/");
+            } else if (parts.length == 2) {
+                roots.add(parts[0] + "/");
+            }
+        }
+        Set<String> missing = new java.util.TreeSet<>();
+        for (List<CallEdge> out : edges.values()) {
+            for (CallEdge edge : out) {
+                String owner = edge.site().target().owner();
+                boolean application = options.includePrefixes().isEmpty()
+                        ? roots.stream().anyMatch(owner::startsWith)
+                        : options.isIncluded(owner);
+                if (application && !hierarchy.contains(owner)) {
+                    missing.add(MethodRef.toDottedName(owner));
+                }
+            }
+        }
+        if (!missing.isEmpty()) {
+            List<String> shown = missing.stream().limit(15).toList();
+            warnings.add("Akista sinif yolunda (--cp) OLMAYAN siniflara cagri var, iclerine girilemedi: "
+                    + String.join(", ", shown) + (missing.size() > shown.size() ? " ... (" + missing.size()
+                    + " sinif)" : "") + ". Bu siniflarin bulundugu jar/dizinleri --cp ile ekleyin.");
+        }
     }
 
     private void enqueue(MethodRef caller, CallSite site, List<DispatchTarget> dispatch, int depth, String via,
