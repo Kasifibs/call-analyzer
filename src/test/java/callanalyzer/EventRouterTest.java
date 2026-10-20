@@ -21,8 +21,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EventRouterTest {
 
+    /** These tests check how dispatcher calls are resolved: dispatch mode. */
     private static final EventConfig EVENTS = new EventConfig("sample.events.Event", "sample.events.EventDispatcher",
-            "sample.events.IObserver", null);
+            "sample.events.IObserver", null, true, EventConfig.Detection.DISPATCH);
+    private static final EventConfig NEW_MODE = new EventConfig("sample.events.Event",
+            "sample.events.EventDispatcher", "sample.events.IObserver", null);
 
     private static AnalysisResult analyze(String method, boolean withEvents) {
         AnalysisOptions options = new AnalysisOptions().entry("sample.events.EventFlowService#" + method)
@@ -31,6 +34,12 @@ class EventRouterTest {
             options.events(EVENTS);
         }
         return new CallGraphAnalyzer(Fixtures.hierarchy(), options, Fixtures.classBytes()).analyze();
+    }
+
+    private static AnalysisResult analyzeNewMode(String method) {
+        return new CallGraphAnalyzer(Fixtures.hierarchy(), new AnalysisOptions()
+                .entry("sample.events.EventFlowService#" + method).target("sample.cars.ICar").events(NEW_MODE),
+                Fixtures.classBytes()).analyze();
     }
 
     private static List<String> observers(EventDispatch e) {
@@ -151,7 +160,7 @@ class EventRouterTest {
     void exactOrAssignableTypeMatching() {
         assertEquals(List.of(), observers(analyze("urgentTyre", true).events().get(0)));
         EventConfig assignable = new EventConfig("sample.events.Event", "sample.events.EventDispatcher",
-                "sample.events.IObserver", null, false);
+                "sample.events.IObserver", null, false, EventConfig.Detection.DISPATCH);
         AnalysisResult r = new CallGraphAnalyzer(Fixtures.hierarchy(), new AnalysisOptions()
                 .entry("sample.events.EventFlowService#urgentTyre").target("sample.cars.ICar").events(assignable),
                 Fixtures.classBytes()).analyze();
@@ -187,5 +196,55 @@ class EventRouterTest {
             assertEquals(List.of("TyreObserver"), observers(e), method);
             assertFalse(reached(r, "SpareTyreObserver"), method);
         }
+    }
+
+    // ------------------------------------------------------------------------------------------- new mode
+
+    @Test
+    void newModeTakesEveryCreatedEventAndConfirmsItWithTheDispatcherCall() {
+        AnalysisResult r = analyzeNewMode("rent");
+        assertEquals(List.of("CarRentedEvent", "CarReturnedEvent"), r.events().stream()
+                .map(e -> MethodRef.simpleName(e.eventClasses().get(0))).toList());
+        EventDispatch rented = r.events().get(0);
+        assertEquals(EventDispatch.Kind.CREATION, rented.kind());
+        assertEquals(List.of("CarRentedObserver", "KafkaCarRentedObserver"), observers(rented));
+        assertEquals(List.of("EventFlowService.java:12"), rented.confirmations());
+        assertFalse(rented.assumed());
+        Finding charge = finding(r, "CarReturnedObserver", "charge"); // inner event created in CarRentedObserver
+        assertFalse(charge.viaAssumedEvent());
+        assertFalse(reached(r, "PaymentObserver"));
+    }
+
+    @Test
+    void newModeNeedsNoDispatcherCallAndMarksUnconfirmedEventsAsAssumed() {
+        AnalysisResult r = analyzeNewMode("createWithoutPublishing");
+        EventDispatch e = r.events().get(0);
+        assertEquals(List.of("TyreObserver"), observers(e));
+        assertTrue(e.confirmations().isEmpty());
+        assertTrue(e.assumed());
+        Finding brand = finding(r, "TyreObserver", "brand");
+        assertTrue(brand.viaAssumedEvent());
+        assertTrue(brand.chain().stream().anyMatch(ChainStep::assumed));
+    }
+
+    @Test
+    void newModeFindsEventsCreatedInsideTheAggregate() {
+        for (String method : List.of("aggregateLoop", "aggregateMethodRef", "aggregateLambda")) {
+            AnalysisResult r = analyzeNewMode(method);
+            assertEquals(1, r.events().size(), method);
+            EventDispatch e = r.events().get(0);
+            assertEquals("sample/events/CarAggregate", e.caller().owner(), method); // created in changeTyre()
+            assertEquals(List.of("TyreObserver"), observers(e), method);
+            assertFalse(e.assumed(), method + " " + e.confirmations());
+            assertFalse(reached(r, "SpareTyreObserver"), method); // scrap() is not called
+        }
+    }
+
+    @Test
+    void newModeIgnoresDispatchedEventsThatAreNotCreatedInTheFlow() {
+        AnalysisResult r = analyzeNewMode("unknownEvent");
+        assertTrue(r.events().isEmpty());
+        assertFalse(reached(r, "PaymentObserver"));
+        assertFalse(reached(r, "EventDispatcher")); // the dispatcher body is not entered
     }
 }

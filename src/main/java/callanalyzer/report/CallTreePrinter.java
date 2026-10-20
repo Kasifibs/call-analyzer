@@ -42,7 +42,8 @@ public final class CallTreePrinter {
         result.findings().forEach(f -> hits.add(List.of(f.caller(), f.site())));
         result.events().forEach(e -> result.edges().getOrDefault(e.caller(), List.of()).stream()
                 .filter(edge -> edge.site().target().equals(e.dispatchMethod()) && edge.site().line() == e.line())
-                .forEach(edge -> eventLabels.put(List.of(edge.caller(), edge.site()), e.label())));
+                .forEach(edge -> eventLabels.put(List.of(edge.caller(), edge.site()),
+                        e.label() + (e.assumed() ? " (varsayim)" : ""))));
     }
 
     public static void write(AnalysisResult result, PrintWriter out) {

@@ -175,7 +175,7 @@ class MainTest {
                 "--entry", "sample.events.EventFlowService#aggregateMethodRef",
                 "--entry", "sample.events.EventFlowService#unknownEvent",
                 "--event-class", "sample.events.Event", "--event-dispatcher", "sample.events.EventDispatcher",
-                "--event-observer", "sample.events.IObserver"};
+                "--event-observer", "sample.events.IObserver", "--event-detection", "dispatch"};
         Run text = run(args);
         assertEquals(0, text.exit(), text.err());
         String out = text.out();
@@ -189,6 +189,23 @@ class MainTest {
         Run json = run(concat(args, "--format", "json"));
         assertTrue(json.out().contains("\"published\": {"), json.out());
         assertTrue(json.out().contains("\"sample.events.TyreChangedEvent\": ["), json.out());
+    }
+
+    @Test
+    void newModeMarksFindingsReachedThroughUnconfirmedEvents() throws Exception {
+        String[] args = {"--cp", Fixtures.sampleClassesDir().toString(), "--target", "sample.cars.ICar",
+                "--entry", "sample.events.EventFlowService#createWithoutPublishing",
+                "--event-class", "sample.events.Event", "--event-dispatcher", "sample.events.EventDispatcher",
+                "--event-observer", "sample.events.IObserver"};
+        Run text = run(args);
+        assertEquals(0, text.exit(), text.err());
+        assertTrue(text.out().contains("EVENT VARSAYIMI"), text.out());
+        assertTrue(text.out().contains("[event TyreChangedEvent (varsayim)] TyreObserver#handle(TyreChangedEvent)"),
+                text.out());
+        assertTrue(text.out().contains("yayin: DOGRULANAMADI"), text.out());
+        Run json = run(concat(args, "--format", "json"));
+        assertTrue(json.out().contains("\"viaAssumedEvent\": true"), json.out());
+        assertEquals(2, run(concat(args, "--event-detection", "bogus")).exit());
     }
 
     @Test

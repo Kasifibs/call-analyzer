@@ -68,4 +68,9 @@ public class EventFlowService {
         aggregate.changeTyre();
         aggregate.pullEvents().stream().filter(e -> e != null).forEach(e -> dispatcher.dispatch(e));
     }
+
+    public void createWithoutPublishing() {
+        TyreChangedEvent event = new TyreChangedEvent(); // created, but never handed to the dispatcher
+        System.out.println(event);
+    }
 }

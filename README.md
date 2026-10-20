@@ -55,6 +55,7 @@ java -jar target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--fail-on-missing` | Karşılaştırmada kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
 | `--event-class`, `--event-dispatcher`, `--event-observer` | Event takibi (bkz. aşağıda). Üçü birlikte verilir. |
 | `--event-handle-method <ad>` | Observer'ın event'i alan metodu (varsayılan `handle`). |
+| `--event-detection new\|dispatch` | `new` (varsayılan): akışta `new` ile oluşturulan her event yayınlanmış sayılır; `dispatch`: yalnızca dispatcher'a verilenler (bkz. aşağıda). |
 | `--event-match exact\|assignable` | `addObserver(this)` ile kaydolan `IObserver<AEvent>` yalnızca `AEvent`'i mi (varsayılan) yoksa alt sınıflarını da mı alır. |
 | `--scan` | `--entry` yerine: acquire eden tüm metotları bulup her birini analiz eder (bkz. aşağıda). |
 | `--config <dosya>` | Seçenekleri bir ayar dosyasından oku (bkz. aşağıda). |
@@ -301,6 +302,24 @@ public class CarRentedObserver implements IObserver<CarRentedEvent> {
 ```bat
 java -jar call-analyzer-1.0.0-SNAPSHOT-all.jar --cp uygulamam.jar --entry "com.example.RentalService#rent" --target com.example.ICar --event-class com.example.event.Event --event-dispatcher com.example.event.EventDispatcher --event-observer com.example.event.IObserver
 ```
+
+### Event'lerin tespiti (`--event-detection`)
+
+- **`new` (varsayılan):** Akışta çalışan metotlarda `new XDomainEvent(...)` ile oluşturulan **her event'in yayınlandığı
+  varsayılır**; akış, event'in oluşturulduğu yerden o event'i dinleyen observer'ların `handle` metoduna devam eder
+  (zincirde `[event XDomainEvent]`, ağaçta `[yayin] new XDomainEvent()`). Dispatcher'ın kendisinin içine girilmez.
+  Event'in dispatcher'a gerçekten verilip verilmediğine yalnızca **doğrulama** için bakılır:
+  - akışta event'i yayınlayan bir `notify(...)` çağrısı bulunursa: `yayin: notify ile dogrulandi (Dosya.java:satir)`,
+  - bulunamazsa: `yayin: DOGRULANAMADI` — bu event **varsayımla** yayınlanmış sayılmıştır. Bu event üzerinden ulaşılan
+    bulgular Bulgular'da ve acquire karşılaştırmasında **`EVENT VARSAYIMI` / `[event varsayimi]`** ile işaretlenir
+    (HTML'de "event varsayımı" etiketi ve "Event varsayımıyla ulaşılanları gizle" filtresi).
+- **`dispatch`:** Yalnızca dispatcher'ın yayın metoduna (`notify(event)`, `dispatch(event)`) verilen event'ler sayılır;
+  event'in sınıfı veri akışıyla bulunur (aşağıda). Event belirlenemezse akış kayıtlı tüm observer'lara devam eder ve
+  bu da varsayım olarak işaretlenir.
+
+Observer seçimi (aşağıdaki kayıt tablosu ve tip kontrolü) iki modda da aynıdır.
+
+### Dispatch modunda event'in bulunması
 
 Event ayarı olmadan araç `dispatcher.dispatch(event)` içindeki `observer.handle(event)` çağrısında **tüm**
 `IObserver` uygulamalarına iner. Event ayarıyla:

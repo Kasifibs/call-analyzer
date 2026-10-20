@@ -11,12 +11,28 @@ package callanalyzer.events;
  * @param exactTypeMatch  for observers registered without an event name ({@code addObserver(this)}): {@code true}
  *                        if an {@code IObserver<AEvent>} only receives {@code AEvent} itself, {@code false} if it also
  *                        receives subclasses of {@code AEvent}
+ * @param detection       how published events are found
  */
 public record EventConfig(String eventClass, String dispatcherClass, String observerClass, String handleMethod,
-                          boolean exactTypeMatch) {
+                          boolean exactTypeMatch, Detection detection) {
+
+    public enum Detection {
+        /**
+         * Every event created with {@code new} in the flow is assumed to be published; its observers continue the
+         * flow from where it is created. Dispatcher calls are only used to confirm the publication.
+         */
+        NEW,
+        /** Events are those passed to the dispatcher's publish method ({@code notify(event)}). */
+        DISPATCH
+    }
 
     public EventConfig(String eventClass, String dispatcherClass, String observerClass, String handleMethod) {
-        this(eventClass, dispatcherClass, observerClass, handleMethod, true);
+        this(eventClass, dispatcherClass, observerClass, handleMethod, true, Detection.NEW);
+    }
+
+    public EventConfig(String eventClass, String dispatcherClass, String observerClass, String handleMethod,
+                       boolean exactTypeMatch) {
+        this(eventClass, dispatcherClass, observerClass, handleMethod, exactTypeMatch, Detection.NEW);
     }
 
     public EventConfig {
@@ -26,6 +42,9 @@ public record EventConfig(String eventClass, String dispatcherClass, String obse
         }
         if (handleMethod == null || handleMethod.isBlank()) {
             handleMethod = "handle";
+        }
+        if (detection == null) {
+            detection = Detection.NEW;
         }
     }
 }

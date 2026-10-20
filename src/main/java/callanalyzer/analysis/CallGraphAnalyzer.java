@@ -4,6 +4,7 @@ import callanalyzer.analysis.ClassHierarchy.DispatchTarget;
 import callanalyzer.dataflow.BytecodeRepository;
 import callanalyzer.dataflow.ValueResolver;
 import callanalyzer.dataflow.ValueResolver.CallerLookup;
+import callanalyzer.events.EventConfig;
 import callanalyzer.events.EventDispatch;
 import callanalyzer.events.EventRouter;
 import callanalyzer.model.CallSite;
@@ -106,6 +107,8 @@ public final class CallGraphAnalyzer {
 
         EventRouter router = null;
         CallerLookup callers = null;
+        boolean newMode = false;
+        List<List<Object>> dispatchSites = new ArrayList<>(); // new mode: dispatcher calls, to confirm publications
         if (options.events() != null) {
             if (sharedRouter != null) {
                 router = sharedRouter;
@@ -117,6 +120,7 @@ public final class CallGraphAnalyzer {
             }
             warnings.addAll(router.warnings());
             callers = ValueResolver.callersFromEdges(edges, router.repository());
+            newMode = router.detection() == EventConfig.Detection.NEW;
         }
 
         List<Finding> found = new ArrayList<>();
@@ -131,9 +135,15 @@ public final class CallGraphAnalyzer {
                 for (CallSite site : info.calls()) {
                     List<DispatchTarget> dispatch;
                     if (router != null && router.isDispatchCall(site)) {
-                        // Routed once the rest of the flow is known (below): which events were added to an aggregate's
-                        // list, for example, depends on methods that have not been analysed yet at this point.
-                        events.put(List.of(current, out.size()), null);
+                        if (newMode) {
+                            // Events are taken from their "new"; the dispatcher call only confirms the publication.
+                            // Its body is not entered either: it would lead to every observer.
+                            dispatchSites.add(List.of(current, site));
+                        } else {
+                            // Routed once the rest of the flow is known (below): which events were added to an
+                            // aggregate's list, for example, depends on methods that have not been analysed yet.
+                            events.put(List.of(current, out.size()), null);
+                        }
                         dispatch = List.of();
                     } else {
                         dispatch = hierarchy.dispatch(site);
@@ -143,6 +153,13 @@ public final class CallGraphAnalyzer {
                         match(current, depth, site, dispatch, target).ifPresent(found::add);
                     }
                     enqueue(current, site, dispatch, depth, null, depths, parents, queue);
+                }
+                if (newMode) {
+                    // Every event created here is assumed to be published: a pseudo call to its observers.
+                    for (EventRouter.Creation creation : router.creations(current)) {
+                        events.put(List.of(current, out.size()), null);
+                        out.add(new CallEdge(current, EventRouter.publicationSite(creation), List.of()));
+                    }
                 }
             }
             if (router == null || events.isEmpty() || round >= MAX_EVENT_ROUNDS) {
@@ -155,7 +172,8 @@ public final class CallGraphAnalyzer {
                 MethodRef caller = (MethodRef) e.getKey().get(0);
                 int index = (Integer) e.getKey().get(1);
                 CallEdge old = edges.get(caller).get(index);
-                EventDispatch ev = router.route(caller, old.site(), callers);
+                EventDispatch ev = newMode ? router.routeCreation(caller, old.site(), callers)
+                        : router.route(caller, old.site(), callers);
                 if (ev.observers().equals(old.targets())) {
                     events.put(e.getKey(), ev);
                     continue;
@@ -177,15 +195,36 @@ public final class CallGraphAnalyzer {
         for (Map.Entry<List<Object>, EventDispatch> e : events.entrySet()) {
             if (e.getValue() == null) { // only if the round limit stopped the traversal early
                 CallEdge edge = edges.get((MethodRef) e.getKey().get(0)).get((Integer) e.getKey().get(1));
-                e.setValue(router.route(edge.caller(), edge.site(), callers));
+                e.setValue(newMode ? router.routeCreation(edge.caller(), edge.site(), callers)
+                        : router.route(edge.caller(), edge.site(), callers));
             }
         }
+        if (newMode) {
+            // Confirm the assumed publications: event classes that some dispatcher call in the flow publishes.
+            Map<String, List<String>> confirmed = new HashMap<>();
+            for (List<Object> d : dispatchSites) {
+                EventDispatch ev = router.route((MethodRef) d.get(0), (CallSite) d.get(1), callers);
+                if (ev.resolution() != EventDispatch.Resolution.ALL) {
+                    for (String cls : ev.eventClasses()) {
+                        confirmed.computeIfAbsent(cls, k -> new ArrayList<>())
+                                .add((ev.sourceFile() == null ? "?" : ev.sourceFile()) + ":" + ev.line());
+                    }
+                }
+            }
+            events.replaceAll((k, ev) -> ev.withConfirmations(
+                    confirmed.getOrDefault(ev.eventClasses().get(0), List.of())));
+        }
+        Map<List<Object>, EventDispatch> eventBySite = new HashMap<>();
+        events.forEach((k, ev) -> {
+            CallEdge edge = edges.get((MethodRef) k.get(0)).get((Integer) k.get(1));
+            eventBySite.put(List.of(edge.caller(), edge.site()), ev);
+        });
 
         // Chains are built once the traversal is done, so that they follow the final (shortest) parent links.
         List<Finding> findings = found.stream()
                 .map(f -> new Finding(f.targetType(), f.caller(), f.callerSourceFile(), f.site(), f.depth(),
                         f.matchedTargets(), f.receiverTypeMatches(), f.interfaceMethod(), f.internalCall(),
-                        chainTo(f.caller(), parents)))
+                        chainTo(f.caller(), parents, eventBySite)))
                 .toList();
         warnMissingClasses(entries, edges, warnings);
         Map<MethodRef, List<CallEdge>> frozenEdges = new LinkedHashMap<>();
@@ -289,16 +328,19 @@ public final class CallGraphAnalyzer {
                 depth, matched, receiverMatches, interfaceMethod, internal, List.of()));
     }
 
-    private List<ChainStep> chainTo(MethodRef method, Map<MethodRef, Parent> parents) {
+    private List<ChainStep> chainTo(MethodRef method, Map<MethodRef, Parent> parents,
+                                    Map<List<Object>, EventDispatch> eventBySite) {
         List<ChainStep> chain = new ArrayList<>();
         MethodRef current = method;
         Parent p = parents.get(current);
         while (p != null) {
-            chain.add(new ChainStep(current, p.site().line(), p.via()));
+            EventDispatch ev = p.via() == null ? null : eventBySite.get(List.of(p.caller(), p.site()));
+            chain.add(new ChainStep(current, p.site().line(), ev == null ? p.via() : ev.label(),
+                    ev != null && ev.assumed()));
             current = p.caller();
             p = parents.get(current);
         }
-        chain.add(new ChainStep(current, -1, null));
+        chain.add(new ChainStep(current, -1, null, false));
         Collections.reverse(chain);
         return List.copyOf(chain);
     }

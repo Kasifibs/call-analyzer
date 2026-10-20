@@ -50,6 +50,7 @@ public final class JsonReport {
         m.put("receiverTypeMatches", f.receiverTypeMatches());
         m.put("interfaceMethod", f.interfaceMethod());
         m.put("internalCall", f.internalCall());
+        m.put("viaAssumedEvent", f.viaAssumedEvent());
         m.put("implementations", f.matchedTargets().stream()
                 .map(t -> {
                     Map<String, Object> i = new LinkedHashMap<>();
@@ -62,6 +63,7 @@ public final class JsonReport {
                     Map<String, Object> c = new LinkedHashMap<>();
                     c.put("method", s.method().toQualifiedString());
                     c.put("callLine", s.callLine());
+                    c.put("assumed", s.assumed());
                     c.put("via", s.via());
                     return c;
                 }).toList());

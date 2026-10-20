@@ -37,13 +37,14 @@ public final class EventReport {
         for (EventDispatch e : result.events()) {
             out.println();
             out.println("[E" + i++ + "] " + e.caller().toShortString() + "  " + TextReport.location(e.sourceFile(), e.line())
-                    + "  " + e.dispatchMethod().toShortString());
+                    + "  " + e.publication());
             out.println("     Event      : " + (e.eventClasses().isEmpty() ? "?" : e.eventClasses().stream()
                     .map(MethodRef::simpleName).collect(Collectors.joining(", ")))
                     + (e.eventNames().isEmpty() ? "" : "   ad: " + e.eventNames().stream()
                     .map(n -> "\"" + n + "\"").collect(Collectors.joining(", "))));
             e.eventOrigins().forEach((cls, list) -> list.forEach(o -> out.println("     Kaynak     : "
                     + (cls.equals("?") ? "" : MethodRef.simpleName(cls) + " <- ") + o)));
+            out.println("     Yayin      : " + publicationText(e));
             out.println("     Secim      : " + resolutionText(e));
             out.println("     Observer'lar: " + (e.observers().isEmpty() ? "(dinleyen observer yok)"
                     : e.observers().stream().map(EventReport::observerLabel).collect(Collectors.joining(", "))));
@@ -86,6 +87,7 @@ public final class EventReport {
                 for (String o : origins) {
                     out.println("    " + pad("", 24) + "     <- " + o);
                 }
+                out.println("    " + pad("", 24) + "     yayin: " + publicationText(e));
             }
         });
         out.println();
@@ -96,6 +98,15 @@ public final class EventReport {
         String method = t.method().toShortString();
         return t.method().owner().equals(t.receiverClass()) ? method
                 : MethodRef.simpleName(t.receiverClass()) + ": " + method;
+    }
+
+    static String publicationText(EventDispatch e) {
+        if (e.kind() == EventDispatch.Kind.CREATION) {
+            return e.confirmations().isEmpty()
+                    ? "DOGRULANAMADI - new ile olusturuldu, yayinlandigi varsayildi (notify cagrisi bulunamadi)"
+                    : "notify ile dogrulandi (" + String.join(", ", e.confirmations()) + ")";
+        }
+        return e.assumed() ? "event belirlenemedi (varsayim)" : "dispatcher cagrisi";
     }
 
     static String key(Registration r) {
@@ -138,6 +149,9 @@ public final class EventReport {
             em.put("eventClasses", e.eventClasses().stream().map(MethodRef::toDottedName).toList());
             em.put("eventNames", e.eventNames());
             em.put("resolution", e.resolution().name());
+            em.put("kind", e.kind().name());
+            em.put("confirmations", e.confirmations());
+            em.put("assumed", e.assumed());
             em.put("observers", e.observers().stream().map(t -> MethodRef.toDottedName(t.receiverClass()) + ": "
                     + t.method().toQualifiedString()).toList());
             return (Object) em;

@@ -25,4 +25,9 @@ import java.util.List;
 public record Finding(String targetType, MethodRef caller, String callerSourceFile, CallSite site, int depth,
                       List<DispatchTarget> matchedTargets, boolean receiverTypeMatches, boolean interfaceMethod,
                       boolean internalCall, List<ChainStep> chain) {
+
+    /** Reached only through an event hop that rests on an assumption (see {@link ChainStep#assumed()}). */
+    public boolean viaAssumedEvent() {
+        return chain.stream().anyMatch(ChainStep::assumed);
+    }
 }

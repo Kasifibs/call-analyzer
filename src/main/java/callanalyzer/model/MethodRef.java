@@ -10,6 +10,16 @@ import java.util.stream.Collectors;
  */
 public record MethodRef(String owner, String name, String desc) implements Comparable<MethodRef> {
 
+    /**
+     * Name of the pseudo method {@code <yayin>} of an event class: in event "new" mode, the edge from the method
+     * creating an event to the event's observers is a call to this method.
+     */
+    public static final String PUBLICATION = "<yayin>";
+
+    public boolean isPublication() {
+        return PUBLICATION.equals(name);
+    }
+
     public static String toDottedName(String internalName) {
         return internalName.replace('/', '.');
     }
@@ -34,11 +44,17 @@ public record MethodRef(String owner, String name, String desc) implements Compa
 
     /** {@code com.example.Garage#service(com.example.ICar)} */
     public String toQualifiedString() {
+        if (isPublication()) {
+            return "[yayin] new " + ownerDotted() + "()";
+        }
         return ownerDotted() + "#" + name + "(" + argumentList(false) + ")";
     }
 
     /** {@code Garage#service(ICar)} */
     public String toShortString() {
+        if (isPublication()) {
+            return "[yayin] new " + simpleName(owner) + "()";
+        }
         return simpleName(owner) + "#" + name + "(" + argumentList(true) + ")";
     }
 

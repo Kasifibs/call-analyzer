@@ -117,6 +117,8 @@ function renderSummary(sec) {
     const types = [...pub.keys()].filter(k => k !== "?").length;
     cards.append(card(types, "Yayınlanan event tipi" + (pub.has("?") ? " (+" + pub.get("?").length + " belirlenemeyen)" : ""),
         pub.has("?") ? "warn" : ""));
+    const assumed = D.events.dispatches.filter(d => d.as).length;
+    if (assumed) cards.append(card(assumed, "Yayını doğrulanamayan event (varsayım)", "warn"));
   }
   sec.append(cards);
 
@@ -162,10 +164,12 @@ function renderFindings(sec) {
   const q = h("input", {type: "search", placeholder: "Ara: metot, sınıf, dosya…", oninput: apply});
   const onlyCertain = h("input", {type: "checkbox", onchange: apply});
   const hideInternal = h("input", {type: "checkbox", onchange: apply});
+  const hideAssumed = h("input", {type: "checkbox", onchange: apply});
   const counter = h("span", {class: "muted"});
   sec.append(h("div", {class: "toolbar"}, q,
       h("label", null, onlyCertain, " Yalnızca statik tipi eşleşenler"),
-      h("label", null, hideInternal, " Uygulama içi çağrıları gizle"), counter));
+      h("label", null, hideInternal, " Uygulama içi çağrıları gizle"),
+      F.some(f => f.as) ? h("label", null, hideAssumed, " Event varsayımıyla ulaşılanları gizle") : null, counter));
   const table = h("table", null, h("tr", null, h("th", null, "#"), h("th", null, "Çağrılan"),
       h("th", null, "Olası sınıflar"), h("th", null, "Yer"), h("th", null, "Derinlik"), h("th", null, "Not")));
   findingRows = F.map((f, i) => {
@@ -175,6 +179,7 @@ function renderFindings(sec) {
     if (!f.rt) notes.push(badge("olası", "warn"));
     if (f.in) notes.push(badge("uygulama içi"));
     if (f.ch.some(s => s.v)) notes.push(badge("event", "event"));
+    if (f.as) notes.push(badge("event varsayımı", "warn"));
     const row = h("tr", {class: "f-row", onclick: () => toggleFinding(i)},
         h("td", {class: "muted"}, i + 1), h("td", {class: "mono"}, f.c),
         h("td", null, f.r.map(r => badge(r[0], "hit"))),
@@ -189,7 +194,8 @@ function renderFindings(sec) {
     const s = q.value.trim().toLowerCase();
     let n = 0;
     for (const fr of findingRows) {
-      const visible = (!s || fr.text.includes(s)) && (!onlyCertain.checked || fr.f.rt) && (!hideInternal.checked || !fr.f.in);
+      const visible = (!s || fr.text.includes(s)) && (!onlyCertain.checked || fr.f.rt) && (!hideInternal.checked || !fr.f.in)
+          && (!hideAssumed.checked || !fr.f.as);
       fr.row.style.display = visible ? "" : "none";
       if (fr.detail) fr.detail.style.display = visible && fr.row.classList.contains("open") ? "" : "none";
       if (visible) n++;
@@ -211,13 +217,14 @@ function toggleFinding(i) {
 function findingDetail(f, i) {
   const chain = h("ol", {class: "chain"});
   f.ch.forEach((s, k) => chain.append(h("li", null,
-      s.v ? badge(s.v, "event") : null, h("span", {class: "mono"}, M[s.id].s),
+      s.v ? badge(s.v + (s.as ? " (varsayım)" : ""), s.as ? "warn" : "event") : null, h("span", {class: "mono"}, M[s.id].s),
       k > 0 ? h("span", {class: "muted"}, "  ← " + loc(M[f.ch[k - 1].id].f, s.l)) : h("span", {class: "muted"}, "  (giriş)"))));
   chain.append(h("li", null, badge("hedef", "hit"), h("span", {class: "mono"}, f.c),
       h("span", {class: "muted"}, "  ← " + loc(f.f, f.l))));
   const impls = h("div", null, h("span", {class: "muted"}, "Çalışabilecek metotlar: "),
       f.r.length ? f.r.map(r => badge(r[0] + " → " + r[1], "hit")) : h("span", {class: "muted"}, "(uygulaması bulunamadı)"));
-  return h("div", null, h("div", {class: "muted"}, "Çağrı zinciri:"), chain, impls,
+  const assumedNote = f.as ? h("div", {class: "badge warn"}, "Bu çağrıya, yayınlandığı doğrulanamayan (yalnızca new ile oluşturulduğu görülen) bir event üzerinden ulaşıldı.") : null;
+  return h("div", null, assumedNote, h("div", {class: "muted"}, "Çağrı zinciri:"), chain, impls,
       h("div", {style: "margin-top:6px"}, h("button", {class: "btn", onclick: e => { e.stopPropagation(); revealFinding(i); }},
           "Ağaçta göster")));
 }
@@ -315,7 +322,7 @@ function callNode(mid, ci, c, anc) {
   const expandable = single ? M[tid].a && !recursive : c.t.length > 0;
   const kids = [hit ? h("span", {style: "color:var(--hit)"}, "★") : null,
       h("span", {class: "lbl"}, c.c), h("span", {class: "loc"}, loc(M[mid].f, c.l))];
-  if (c.e) kids.push(badge(c.e + (c.t.length ? "" : " · dinleyen yok"), "event"));
+  if (c.e) kids.push(badge(c.e + (c.t.length ? "" : " · dinleyen yok"), c.e.includes("varsayım") ? "warn" : "event"));
   if (c.la) kids.push(badge("lambda"));
   if (hit && !single) kids.push(...[...new Set(c.t.map(t => t[0]))].map(r => badge(r, "hit")));
   if (recursive) kids.push(badge("↻ özyineleme"));
@@ -419,11 +426,13 @@ function category(sec, cls, title, usages) {
   const p = h("div", {class: "panel cat " + cls}, h("h2", null, title + " (" + usages.length + ")"));
   for (const u of usages) {
     const sites = [...u.certain.map(i => [i, true]), ...u.possible.map(i => [i, false])];
+    const onlyAssumed = sites.length > 0 && sites.every(([i]) => F[i].as);
     p.append(h("div", {class: "usage"}, h("span", {class: "cls"}, u.cls), h("span", {class: "muted"}, "  " + u.q),
+        onlyAssumed ? badge("yalnızca event varsayımı üzerinden", "warn") : null,
         h("ul", null, sites.map(([i, certain]) => h("li", null,
             h("button", {class: "link mono", onclick: () => showFinding(i)}, F[i].c), "  ",
             h("span", {class: "muted"}, M[F[i].by].s + "  " + loc(F[i].f, F[i].l)),
-            certain ? null : badge("arayüz üzerinden", "warn"), " ",
+            certain ? null : badge("arayüz üzerinden", "warn"), F[i].as ? badge("event varsayımı", "warn") : null, " ",
             h("button", {class: "link", onclick: () => revealFinding(i)}, "ağaçta göster"))))));
   }
   sec.append(p);
@@ -438,9 +447,17 @@ function publishedEvents() {
   });
   return new Map([...map].sort((a, b) => a[0] === "?" ? 1 : b[0] === "?" ? -1 : a[0].localeCompare(b[0])));
 }
+function publicationBadge(d) {
+  if (d.kind === "CREATION") {
+    return d.conf.length ? [badge("notify ile doğrulandı", "ok"), h("div", {class: "muted"}, d.conf.join(", "))]
+        : badge("doğrulanamadı (varsayım)", "warn");
+  }
+  return d.as ? badge("belirlenemedi (varsayım)", "hit") : badge("dispatcher çağrısı", "ok");
+}
 function renderEvents(sec) {
   const pub = publishedEvents();
-  const pt = h("table", null, h("tr", null, h("th", null, "Event"), h("th", null, "Yayınlandığı yer"), h("th", null, "Nereden geliyor")));
+  const pt = h("table", null, h("tr", null, h("th", null, "Event"), h("th", null, "Yayınlandığı / oluşturulduğu yer"),
+      h("th", null, "Nereden geliyor"), h("th", null, "Yayın")));
   for (const [cls, ids] of pub) ids.forEach((i, k) => {
     const d = D.events.dispatches[i];
     pt.append(h("tr", null,
@@ -448,7 +465,8 @@ function renderEvents(sec) {
         h("td", null, h("b", null, "E" + (i + 1) + " "), h("span", {class: "mono"}, M[d.by].s),
             h("span", {class: "muted"}, "  " + loc(d.f, d.l) + " "),
             h("button", {class: "link", onclick: () => reveal(d.by, c => c.e && c.l === d.l)}, "ağaçta göster")),
-        h("td", {class: "muted"}, (d.origins[cls] || []).map(o => h("div", null, o)))));
+        h("td", {class: "muted"}, (d.origins[cls] || []).map(o => h("div", null, o))),
+        h("td", null, publicationBadge(d))));
   });
   sec.append(h("div", {class: "panel"}, h("h2", null, "Akışta yayınlanan event'ler (" + [...pub.keys()].filter(k => k !== "?").length + " tip)"),
       pub.size ? pt : h("p", {class: "muted"}, "Akışta event yayınlanmıyor.")));
@@ -476,7 +494,7 @@ function renderEvents(sec) {
         h("b", null, "E" + (i + 1) + " "), h("span", {class: "mono"}, M[d.by].s), h("span", {class: "muted"}, "  " + loc(d.f, d.l) + "  " + d.dm), " ",
         h("button", {class: "link", onclick: () => reveal(d.by, c => c.e && c.l === d.l)}, "ağaçta göster"),
         h("div", null, h("span", {class: "muted"}, "Event: "), d.cls.length ? d.cls.join(", ") : "?", " ",
-            d.names.map(n => badge(n, "event")), " ", badge(res[0], res[1])),
+            d.names.map(n => badge(n, "event")), " ", badge(res[0], res[1]), " ", publicationBadge(d)),
         Object.entries(d.origins).map(([cls, list]) => list.map(o => h("div", {class: "muted"},
             "Kaynak: " + (cls === "?" ? "" : cls + " ← ") + o))),
         h("ul", null, d.obs.length ? d.obs.map(([recv, id]) => h("li", {class: "mono"},

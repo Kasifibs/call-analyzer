@@ -77,6 +77,10 @@ public final class Main {
                                          or. com.example.event.EventDispatcher
               --event-observer <tip>     Observer'larin temel tipi, or. com.example.event.IObserver
               --event-handle-method <ad> Observer'in event'i alan metodu (varsayilan: handle)
+              --event-detection new|dispatch
+                                         new (varsayilan): akista 'new' ile olusturulan her event yayinlanmis
+                                         varsayilir, akis olusturuldugu yerden observer'larina devam eder.
+                                         dispatch: yalnizca dispatcher'a (notify(event)) verilen event'ler.
               --event-match exact|assignable
                                          addObserver(this) gibi ad vermeden kaydolan observer'lar icin:
                                          IObserver<AEvent> yalnizca AEvent'i mi (exact, varsayilan) yoksa AEvent'in
@@ -125,6 +129,7 @@ public final class Main {
         String eventObserver = null;
         String eventHandle = null;
         boolean eventExact = true;
+        EventConfig.Detection eventDetection = EventConfig.Detection.NEW;
         String format = "text";
         boolean openAfter = false;
         boolean scan = false;
@@ -160,6 +165,13 @@ public final class Main {
                     case "--event-dispatcher" -> eventDispatcher = value(args, ++i, a);
                     case "--event-observer" -> eventObserver = value(args, ++i, a);
                     case "--event-handle-method" -> eventHandle = value(args, ++i, a);
+                    case "--event-detection" -> {
+                        String v = value(args, ++i, a);
+                        if (!v.equals("new") && !v.equals("dispatch")) {
+                            throw new IllegalArgumentException("Gecersiz --event-detection: " + v + " (new|dispatch)");
+                        }
+                        eventDetection = v.equals("new") ? EventConfig.Detection.NEW : EventConfig.Detection.DISPATCH;
+                    }
                     case "--event-match" -> {
                         String v = value(args, ++i, a);
                         if (!v.equals("exact") && !v.equals("assignable")) {
@@ -188,7 +200,8 @@ public final class Main {
                 throw new IllegalArgumentException("--cp, --entry ve --target zorunludur.");
             }
             if (eventClass != null || eventDispatcher != null || eventObserver != null) {
-                options.events(new EventConfig(eventClass, eventDispatcher, eventObserver, eventHandle, eventExact));
+                options.events(new EventConfig(eventClass, eventDispatcher, eventObserver, eventHandle, eventExact,
+                        eventDetection));
             }
             if (!format.equals("text") && !format.equals("json") && !format.equals("html")) {
                 throw new IllegalArgumentException("Gecersiz --format: " + format);

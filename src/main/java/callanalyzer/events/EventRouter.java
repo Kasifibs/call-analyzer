@@ -68,6 +68,7 @@ public final class EventRouter {
     /** Observers registered without a name, and the event type each one handles. */
     private final Map<String, String> observerTypes = new TreeMap<>();
     private final boolean exactTypeMatch;
+    private final EventConfig.Detection detection;
     private final List<Registration> registrations = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
 
@@ -79,6 +80,7 @@ public final class EventRouter {
         this.observerClass = hierarchy.resolveClassName(config.observerClass());
         this.handleMethod = config.handleMethod();
         this.exactTypeMatch = config.exactTypeMatch();
+        this.detection = config.detection();
         for (String[] t : new String[][]{{eventClass, "--event-class"}, {dispatcherClass, "--event-dispatcher"},
                 {observerClass, "--event-observer"}}) {
             if (!hierarchy.contains(t[0])) {
@@ -351,6 +353,15 @@ public final class EventRouter {
             }
         }
 
+        ClassInfo callerClass = hierarchy.get(caller.owner());
+        return select(caller, callerClass == null ? null : callerClass.sourceFile(), site.line(), site.target(),
+                eventClasses, names, unknownEvent, frozen(origins), EventDispatch.Kind.DISPATCH);
+    }
+
+    /** Chooses the observers for an event and builds the {@link EventDispatch}. */
+    private EventDispatch select(MethodRef caller, String sourceFile, int line, MethodRef publishedBy,
+                                 Set<String> eventClasses, Set<String> names, boolean unknownEvent,
+                                 Map<String, List<String>> origins, EventDispatch.Kind kind) {
         Set<String> registeredNames = new TreeSet<>(names);
         registeredNames.retainAll(observersByName.keySet());
         boolean registryEmpty = registrations.isEmpty();
@@ -384,12 +395,70 @@ public final class EventRouter {
         for (String o : observers) {
             handleOf(o, eventClasses).ifPresent(m -> targets.add(new DispatchTarget(o, m.ref())));
         }
+        List<String> confirmations = kind == EventDispatch.Kind.DISPATCH && resolution != Resolution.ALL
+                ? List.of((sourceFile == null ? "?" : sourceFile) + ":" + line) : List.of();
+        return new EventDispatch(caller, sourceFile, line, publishedBy, List.copyOf(eventClasses),
+                List.copyOf(resolution == Resolution.BY_NAME ? registeredNames : names), origins, resolution,
+                List.copyOf(targets), kind, confirmations);
+    }
+
+    // ------------------------------------------------------------------------------------------ "new" mode
+
+    /** A {@code new XEvent(..)} in a method: the event class (internal name) and the line. */
+    public record Creation(String eventClass, int line) {
+    }
+
+    /** Every {@code new} of a concrete event class in {@code method}, in bytecode order. */
+    public List<Creation> creations(MethodRef method) {
+        List<Creation> found = new ArrayList<>();
+        MethodNode node = repo.methodNode(method).orElse(null);
+        if (node == null) {
+            return found;
+        }
+        int line = -1;
+        for (AbstractInsnNode insn : node.instructions) {
+            if (insn instanceof org.objectweb.asm.tree.LineNumberNode ln) {
+                line = ln.line;
+            } else if (insn.getOpcode() == Opcodes.NEW && insn instanceof org.objectweb.asm.tree.TypeInsnNode t
+                    && hierarchy.isSubtypeOf(t.desc, eventClass) && hierarchy.contains(t.desc)
+                    && hierarchy.get(t.desc).isConcrete()) {
+                found.add(new Creation(t.desc, line));
+            }
+        }
+        return found;
+    }
+
+    /** The pseudo call site representing the publication of an event created at {@code creation}. */
+    public static CallSite publicationSite(Creation creation) {
+        return new CallSite(callanalyzer.model.InvokeKind.STATIC,
+                new MethodRef(creation.eventClass(), MethodRef.PUBLICATION, "()V"), creation.line(), false);
+    }
+
+    /** Observers of an event created in {@code caller} (new mode); {@code site} is its {@link #publicationSite}. */
+    public EventDispatch routeCreation(MethodRef caller, CallSite site, CallerLookup callers) {
+        String cls = site.target().owner();
+        Set<String> names = new TreeSet<>();
+        MethodDataFlow flow = repo.flow(caller).orElse(null);
+        if (flow != null) {
+            ValueResolver nameResolver = new ValueResolver(hierarchy, repo, "java/lang/String"::equals, callers);
+            for (AbstractInsnNode insn : flow.instructions()) {
+                if (insn.getOpcode() == Opcodes.NEW && insn instanceof org.objectweb.asm.tree.TypeInsnNode t
+                        && t.desc.equals(cls) && flow.lineOf(insn) == site.line()) {
+                    names.addAll(namesFromNewSite(flow, new NewObject(flow.indexOf(insn), cls), nameResolver));
+                }
+            }
+        }
+        names.addAll(constantGetterNames(cls));
         ClassInfo callerClass = hierarchy.get(caller.owner());
-        return new EventDispatch(caller, callerClass == null ? null : callerClass.sourceFile(), site.line(),
-                site.target(), List.copyOf(eventClasses),
-                List.copyOf(resolution == Resolution.BY_NAME ? registeredNames : names), frozen(origins),
-                resolution,
-                List.copyOf(targets));
+        String file = callerClass == null ? null : callerClass.sourceFile();
+        Map<String, List<String>> origins = Map.of(cls, List.of("new " + MethodRef.simpleName(cls) + "() ("
+                + (file == null ? "?" : file) + (site.line() > 0 ? ":" + site.line() : "") + ")"));
+        return select(caller, file, site.line(), site.target(), Set.of(cls), names, false, origins,
+                EventDispatch.Kind.CREATION);
+    }
+
+    public EventConfig.Detection detection() {
+        return detection;
     }
 
     /** Adds the classes and names an event argument can have; returns {@code true} if its class is unknown. */

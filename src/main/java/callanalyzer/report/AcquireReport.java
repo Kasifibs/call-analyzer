@@ -97,7 +97,10 @@ public final class AcquireReport {
         out.println();
         out.println(title);
         for (ClassUsage u : usages) {
-            out.println("  " + MethodRef.toDottedName(u.className()));
+            boolean onlyAssumed = Stream.concat(u.certain().stream(), u.possible().stream())
+                    .allMatch(Finding::viaAssumedEvent);
+            out.println("  " + MethodRef.toDottedName(u.className())
+                    + (onlyAssumed ? "   (yalnizca event varsayimi uzerinden)" : ""));
             List<Finding> sites = new ArrayList<>(certainFirst ? u.certain() : List.of());
             sites.addAll(u.possible());
             if (!certainFirst) {
@@ -106,7 +109,8 @@ public final class AcquireReport {
             for (Finding f : sites.subList(0, Math.min(MAX_SITES, sites.size()))) {
                 out.println("      " + pad(f.site().target().toShortString(), 28) + " "
                         + f.caller().toShortString() + " " + TextReport.location(f.callerSourceFile(), f.site().line())
-                        + (u.certain().contains(f) ? "" : "  [arayuz uzerinden]"));
+                        + (u.certain().contains(f) ? "" : "  [arayuz uzerinden]")
+                        + (f.viaAssumedEvent() ? "  [event varsayimi]" : ""));
             }
             if (sites.size() > MAX_SITES) {
                 out.println("      ... ve " + (sites.size() - MAX_SITES) + " cagri yeri daha");
@@ -174,6 +178,7 @@ public final class AcquireReport {
             m.put("caller", f.caller().toQualifiedString());
             m.put("sourceFile", f.callerSourceFile());
             m.put("line", f.site().line());
+            m.put("viaAssumedEvent", f.viaAssumedEvent());
             return (Object) m;
         }).toList();
     }

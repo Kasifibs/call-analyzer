@@ -56,6 +56,7 @@ public final class TextReport {
             if (!f.receiverTypeMatches()) notes.add("olasi: statik alici tipi "
                     + MethodRef.simpleName(f.site().target().owner()) + ", yalnizca dinamik baglamayla ulasiliyor");
             if (f.internalCall()) notes.add("uygulama sinifi icinden cagri");
+            if (f.viaAssumedEvent()) notes.add("EVENT VARSAYIMI: yayinlandigi dogrulanamayan bir event uzerinden ulasildi");
             if (!notes.isEmpty()) {
                 out.println("    Not     : " + String.join("; ", notes));
             }
@@ -87,7 +88,7 @@ public final class TextReport {
                 sb.append(location(prevClass == null ? null : prevClass.sourceFile(), step.callLine())).append(' ');
             }
             if (step.via() != null) {
-                sb.append('[').append(step.via()).append("] ");
+                sb.append('[').append(step.via()).append(step.assumed() ? " (varsayim)" : "").append("] ");
             }
             sb.append(step.method().toShortString());
         }

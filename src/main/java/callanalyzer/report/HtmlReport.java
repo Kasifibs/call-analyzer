@@ -131,7 +131,7 @@ public final class HtmlReport {
         Map<List<Object>, String> eventLabels = new HashMap<>();
         for (EventDispatch e : result.events()) {
             if (e.caller().equals(caller)) {
-                eventLabels.put(List.of(e.dispatchMethod(), e.line()), e.label());
+                eventLabels.put(List.of(e.dispatchMethod(), e.line()), e.label() + (e.assumed() ? " (varsayım)" : ""));
             }
         }
         List<Object> calls = new ArrayList<>();
@@ -172,6 +172,7 @@ public final class HtmlReport {
         m.put("rt", f.receiverTypeMatches());
         m.put("im", f.interfaceMethod());
         m.put("in", f.internalCall());
+        m.put("as", f.viaAssumedEvent());
         m.put("r", f.matchedTargets().stream().map(t -> List.of(MethodRef.simpleName(t.receiverClass()),
                 t.method().toShortString())).toList());
         m.put("ch", chain(f.chain()));
@@ -185,6 +186,7 @@ public final class HtmlReport {
             m.put("id", id(s.method()));
             m.put("l", s.callLine());
             m.put("v", s.via());
+            m.put("as", s.assumed());
             steps.add(m);
         }
         return steps;
@@ -207,7 +209,10 @@ public final class HtmlReport {
             em.put("by", id(e.caller()));
             em.put("f", e.sourceFile());
             em.put("l", e.line());
-            em.put("dm", e.dispatchMethod().toShortString());
+            em.put("dm", e.publication());
+            em.put("kind", e.kind().name());
+            em.put("conf", e.confirmations());
+            em.put("as", e.assumed());
             em.put("cls", e.eventClasses().stream().map(MethodRef::simpleName).toList());
             em.put("names", e.eventNames());
             Map<String, Object> origins = new LinkedHashMap<>();
