@@ -179,7 +179,8 @@ class MainTest {
         Run text = run(args);
         assertEquals(0, text.exit(), text.err());
         String out = text.out();
-        assertTrue(out.contains("Akista yayinlanan event'ler (1 tip):"), out);
+        // TyreChangedEvent, plus CarReturnedEvent published by CarRentedObserver (reached through the undetermined event)
+        assertTrue(out.contains("Akista yayinlanan event'ler (2 tip):"), out);
         assertTrue(out.contains("<- new TyreChangedEvent() (CarAggregate.java:11)"), out);
         assertTrue(out.contains("? (belirlenemedi)"), out);
         // the undetermined row comes last
