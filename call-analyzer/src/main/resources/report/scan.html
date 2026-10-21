@@ -56,7 +56,7 @@ main.append(filters);
 
 const table = h("table", null, h("tr", null, h("th", null, "#"), h("th", null, "Durum"), h("th", null, "Metot"),
     h("th", null, "Acquire edilen"), h("th", null, "Kesin eksik"), h("th", null, "Olası eksik / belirsiz"),
-    h("th", null, "Kullanılmayan"), h("th", null, "Bulgu")));
+    h("th", null, "Kullanılmayan"), h("th", null, "İstisna"), h("th", null, "Bulgu")));
 const rows = D.methods.map(m => {
   const st = STATUS[m.status];
   const src = [m.callsAcquirer ? badge("acquire()", "acc") : null, m.annotated ? badge("@" + (D.annotationShort || "anotasyon"), "acc") : null];
@@ -69,6 +69,7 @@ const rows = D.methods.map(m => {
       h("td", null, (m.missing || []).map(c => badge(c, "hit"))),
       h("td", null, (m.possiblyMissing || []).map(c => badge(c, "warn")), (m.undecided || []).map(c => badge(c + " ?"))),
       h("td", null, (m.unused || []).map(c => badge(c, "warn"))),
+      h("td", null, (m.exempt || []).map(c => badge(c))),
       h("td", {class: "num"}, m.findings));
   table.append(row);
   return {row, m, text: (m.method + " " + (m.missing || []).join(" ") + " " + (m.acquired || []).join(" ")).toLowerCase()};

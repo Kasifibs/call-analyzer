@@ -120,6 +120,11 @@ public record MethodSpec(String text, String className, String methodName, Strin
         return matches;
     }
 
+    /** Whether the selector names {@code ref}: same class (resolved like {@link #resolve}) and a matching method. */
+    public boolean selects(ClassHierarchy hierarchy, MethodRef ref) {
+        return hierarchy.resolveClassName(className).equals(ref.owner()) && matches(ref);
+    }
+
     /** Whether {@code ref}'s name and parameters match, ignoring its owner class. */
     public boolean matchesSignature(MethodRef ref) {
         return methodName != null && matches(ref);

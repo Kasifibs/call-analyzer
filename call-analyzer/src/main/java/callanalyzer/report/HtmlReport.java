@@ -246,6 +246,7 @@ public final class HtmlReport {
         m.put("missing", usages(c.missing()));
         m.put("possiblyMissing", usages(c.possiblyMissing()));
         m.put("undecided", usages(c.undecided()));
+        m.put("exempt", usages(c.exempt()));
         m.put("covered", usages(c.covered()));
         m.put("unused", c.unused().stream().map(MethodRef::simpleName).toList());
         return m;

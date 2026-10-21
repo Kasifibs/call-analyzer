@@ -409,6 +409,7 @@ function renderAcquire(sec) {
   category(sec, "bad", "Eksik — akışta kesin olarak çağrılıyor ama acquire edilmemiş", A.missing);
   category(sec, "warn", "Olası eksik — yalnızca arayüz üzerinden çağrılıyor olabilir, acquire edilmemiş", A.possiblyMissing);
   category(sec, "info", "Belirsiz — sınıfı belirlenemeyen bir eleman bu sınıf olabilir (" + A.unresolved.join(", ") + ")", A.undecided);
+  category(sec, "info", "İstisna — acquire edilmeden kullanılmasına ayarla izin verilmiş, eksik sayılmadı", A.exempt);
   if (A.unused.length) sec.append(h("div", {class: "panel cat warn"}, h("h2", null, "Acquire edilip akışta kullanılmayan"),
       A.unused.map(c => badge(c, "warn"))));
   category(sec, "ok", "Acquire edilmiş ve kullanılıyor", A.covered);

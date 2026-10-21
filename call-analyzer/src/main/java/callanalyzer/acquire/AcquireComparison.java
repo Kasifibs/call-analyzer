@@ -17,10 +17,13 @@ import java.util.List;
  * @param missing         classes used with certainty (receiver is known exactly) but not in the list
  * @param possiblyMissing classes only possibly used (through an interface call) and not in the list
  * @param undecided       classes not in the list but possibly covered by an unresolved element
+ * @param exempt          classes not in the list that the entry method may use without acquiring them (configured
+ *                        {@link AcquireExemption}s); never counted as missing
  * @param unused          acquired classes that are not used in the flow
  */
 public record AcquireComparison(String acquirer, String annotation, List<AcquireCall> calls,
                                 List<AcquireCall> otherCalls, List<AnnotationCheck> annotations, List<String> acquired,
                                 List<AcquiredCar> unresolved, List<ClassUsage> covered, List<ClassUsage> missing,
-                                List<ClassUsage> possiblyMissing, List<ClassUsage> undecided, List<String> unused) {
+                                List<ClassUsage> possiblyMissing, List<ClassUsage> undecided, List<ClassUsage> exempt,
+                                List<String> unused) {
 }

@@ -1,5 +1,6 @@
 package callanalyzer.maven;
 
+import callanalyzer.acquire.AcquireExemption;
 import callanalyzer.acquire.ClassUsage;
 import callanalyzer.analysis.AnalysisOptions;
 import callanalyzer.analysis.ClassHierarchy;
@@ -109,6 +110,13 @@ public class AnalyzeMojo extends AbstractMojo {
     /** {@code new} or {@code dispatch}. */
     @Parameter(defaultValue = "new")
     private String eventDetection;
+
+    /**
+     * Classes a method may use without acquiring them: they are reported as exempt and never fail the build. A class
+     * also exempts its subclasses (an interface all its implementations). See {@link Exemption}.
+     */
+    @Parameter
+    private List<Exemption> exemptions;
 
     /** Fail the build if a method certainly uses a class it has not acquired. */
     @Parameter(property = "callanalyzer.failOnMissing", defaultValue = "true")
@@ -224,13 +232,16 @@ public class AnalyzeMojo extends AbstractMojo {
                     "dispatch".equals(eventDetection) ? EventConfig.Detection.DISPATCH : EventConfig.Detection.NEW));
         }
 
+        List<AcquireExemption> exempt = acquireExemptions();
         AcquireScanner scanner = new AcquireScanner(hierarchy, loader.classBytes(), options, acquirer,
-                acquireAnnotation);
+                acquireAnnotation).withExemptions(exempt);
         // Only this project's own methods are scanned; dependencies are analysed where the flow leads into them.
         List<Candidate> candidates = scanner.candidates().stream()
                 .filter(c -> ownClasses.contains(c.method().owner()))
                 .toList();
         getLog().info("call-analyzer: acquire eden " + candidates.size() + " metot bulundu");
+        AcquireExemption.problems(hierarchy, exempt, candidates.stream().map(Candidate::method).toList())
+                .forEach(w -> getLog().warn("call-analyzer: " + w));
         if (candidates.isEmpty()) {
             getLog().warn("call-analyzer: acquire eden metot bulunamadi; <acquirer>/<acquireAnnotation> ve <includes>"
                     + " ayarlarini kontrol edin.");
@@ -282,6 +293,10 @@ public class AnalyzeMojo extends AbstractMojo {
                 + " olasi eksik, " + result.count(Status.OK) + " OK" + (result.count(Status.ERROR) > 0
                 ? ", " + result.count(Status.ERROR) + " hata" : ""));
         for (ScanItem item : result.items()) {
+            if (item.comparison() != null && !item.comparison().exempt().isEmpty()) {
+                getLog().info("  [istisna] " + item.candidate().method().toQualifiedString()
+                        + "  acquire edilmeden izin verilen: " + names(item.comparison().exempt()));
+            }
             switch (item.status()) {
                 case MISSING -> getLog().error("  [X] " + item.candidate().method().toQualifiedString()
                         + "  kesin eksik: " + names(item.comparison().missing()));
@@ -304,6 +319,21 @@ public class AnalyzeMojo extends AbstractMojo {
             throw new MojoFailureException("call-analyzer: " + possible + " metotta olasi eksik acquire var."
                     + " Ayrintilar: " + index);
         }
+    }
+
+    private List<AcquireExemption> acquireExemptions() throws MojoExecutionException {
+        if (exemptions == null) {
+            return List.of();
+        }
+        List<AcquireExemption> result = new ArrayList<>();
+        for (Exemption e : exemptions) {
+            try {
+                result.add(new AcquireExemption(e.getMethod(), e.getClasses()));
+            } catch (IllegalArgumentException ex) {
+                throw new MojoExecutionException("call-analyzer: gecersiz <exemption>: " + ex.getMessage(), ex);
+            }
+        }
+        return result;
     }
 
     private static String names(List<ClassUsage> usages) {

@@ -2,11 +2,13 @@ package callanalyzer;
 
 import callanalyzer.acquire.AcquireAnalyzer;
 import callanalyzer.acquire.AcquireComparison;
+import callanalyzer.acquire.AcquireExemption;
 import callanalyzer.acquire.AcquiredCar;
 import callanalyzer.acquire.AnnotationCheck;
 import callanalyzer.acquire.ClassUsage;
 import callanalyzer.analysis.AnalysisOptions;
 import callanalyzer.analysis.AnalysisResult;
+import callanalyzer.analysis.MethodSpec;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -50,6 +52,44 @@ class AcquireAnalyzerTest {
         assertEquals("tow", towTruck.certain().get(0).site().target().name());
         assertTrue(c.possiblyMissing().isEmpty());
         assertTrue(c.unused().isEmpty());
+    }
+
+    @Test
+    void exemptClassesAreNeitherMissingNorPossiblyMissing() {
+        AnalysisResult result = analyze(new AnalysisOptions().entry("sample.cars.RentalService#rent")
+                .target("sample.cars.ICar"));
+        AcquireComparison c = new AcquireAnalyzer(result, Fixtures.classBytes(), "sample.cars.CarAcquirer#acquire")
+                .withExemptions(List.of(AcquireExemption.parse("sample.cars.RentalService#rent=sample.cars.TowTruck"),
+                        AcquireExemption.parse("sample.cars.RentalService#rentOnlyBmw=sample.cars.Bmw")))
+                .analyze();
+        assertTrue(c.missing().isEmpty());
+        assertEquals(List.of("TowTruck"), names(c.exempt()));
+        // an exempt class that is acquired anyway stays covered
+        assertEquals(List.of("Bmw", "Tesla"), names(c.covered()));
+
+        // an exemption for another method does not apply; an interface exempts its implementations
+        AnalysisResult onlyBmw = analyze(new AnalysisOptions().entry("sample.cars.RentalService#rentOnlyBmw")
+                .target("sample.cars.ICar"));
+        AcquireComparison other = new AcquireAnalyzer(onlyBmw, Fixtures.classBytes(), "sample.cars.CarAcquirer#acquire")
+                .withExemptions(List.of(AcquireExemption.parse("sample.cars.RentalService#rent=sample.cars.ICar")))
+                .analyze();
+        assertEquals(List.of("Tesla", "TowTruck"), names(other.possiblyMissing()));
+        AcquireComparison wholeClass = new AcquireAnalyzer(onlyBmw, Fixtures.classBytes(),
+                "sample.cars.CarAcquirer#acquire")
+                .withExemptions(List.of(AcquireExemption.parse("sample.cars.RentalService=sample.cars.ICar")))
+                .analyze();
+        assertTrue(wholeClass.possiblyMissing().isEmpty());
+        assertEquals(List.of("Tesla", "TowTruck"), names(wholeClass.exempt()));
+    }
+
+    @Test
+    void exemptionProblemsAreReported() {
+        List<String> problems = AcquireExemption.problems(Fixtures.hierarchy(),
+                List.of(AcquireExemption.parse("sample.cars.RentalService#nope=sample.cars.TowTruck"),
+                        AcquireExemption.parse("sample.cars.RentalService#rent=sample.cars.Nope")),
+                MethodSpec.parse("sample.cars.RentalService#rent").resolve(Fixtures.hierarchy()));
+        assertEquals(List.of("Istisna analiz edilen hicbir metotla eslesmedi: sample.cars.RentalService#nope",
+                "Istisnadaki sinif sinif yolunda yok: sample.cars.Nope (sample.cars.RentalService#rent)"), problems);
     }
 
     @Test

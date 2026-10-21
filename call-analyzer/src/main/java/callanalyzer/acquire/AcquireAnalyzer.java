@@ -53,6 +53,7 @@ public final class AcquireAnalyzer {
     private final String acquirerClass;
     private final String annotationType;
 
+    private List<AcquireExemption> exemptions = List.of();
     private ValueResolver resolver;
 
     public AcquireAnalyzer(AnalysisResult result, Map<String, byte[]> classBytes, String acquirerSpec) {
@@ -89,6 +90,12 @@ public final class AcquireAnalyzer {
             this.acquirerClass = null;
         }
         this.annotationType = annotationType == null ? null : hierarchy.resolveClassName(annotationType);
+    }
+
+    /** Classes the entry methods may use without acquiring them; see {@link AcquireExemption}. */
+    public AcquireAnalyzer withExemptions(List<AcquireExemption> exemptions) {
+        this.exemptions = List.copyOf(exemptions);
+        return this;
     }
 
     public AcquireComparison analyze() {
@@ -151,11 +158,15 @@ public final class AcquireAnalyzer {
         List<ClassUsage> missing = new ArrayList<>();
         List<ClassUsage> possiblyMissing = new ArrayList<>();
         List<ClassUsage> undecided = new ArrayList<>();
+        List<ClassUsage> exempt = new ArrayList<>();
+        List<String> exemptClasses = AcquireExemption.classesFor(hierarchy, exemptions, result.entries());
         for (String cls : used) {
             ClassUsage usage = new ClassUsage(cls, certain.getOrDefault(cls, List.of()),
                     possible.getOrDefault(cls, List.of()));
             if (acquired.stream().anyMatch(a -> hierarchy.isSubtypeOf(cls, a))) {
                 covered.add(usage);
+            } else if (exemptClasses.stream().anyMatch(e -> hierarchy.isSubtypeOf(cls, e))) {
+                exempt.add(usage);
             } else if (unresolved.stream().anyMatch(u -> hierarchy.isSubtypeOf(cls, u.declaredType()))) {
                 undecided.add(usage);
             } else if (!usage.certain().isEmpty()) {
@@ -169,7 +180,7 @@ public final class AcquireAnalyzer {
                 .toList();
         return new AcquireComparison(acquirerSpec == null ? null : acquirerSpec.text(), annotationType,
                 List.copyOf(calls), List.copyOf(otherCalls), List.copyOf(annotations), List.copyOf(acquired),
-                List.copyOf(unresolved), covered, missing, possiblyMissing, undecided, unused);
+                List.copyOf(unresolved), covered, missing, possiblyMissing, undecided, exempt, unused);
     }
 
     /**

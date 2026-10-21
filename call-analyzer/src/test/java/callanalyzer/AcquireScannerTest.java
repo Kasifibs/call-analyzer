@@ -1,5 +1,6 @@
 package callanalyzer;
 
+import callanalyzer.acquire.AcquireExemption;
 import callanalyzer.analysis.AnalysisOptions;
 import callanalyzer.events.EventConfig;
 import callanalyzer.model.MethodRef;
@@ -78,6 +79,17 @@ class AcquireScannerTest {
         assertEquals(Status.OK, item(r, "viaNew").status());
         // the list comes from outside: its content is unknown, not empty
         assertFalse(item(r, "run").comparison().unresolved().isEmpty());
+    }
+
+    @Test
+    void exemptionsApplyToTheirMethodOnly() {
+        AcquireScanner scanner = scanner(options()).withExemptions(
+                List.of(AcquireExemption.parse("sample.cars.RentalService#rent=sample.cars.TowTruck")));
+        ScanResult r = scanner.run(scanner.candidates(), s -> { }, (i, a) -> { });
+        assertEquals(Status.OK, item(r, "rent").status());
+        assertEquals(List.of("sample/cars/TowTruck"),
+                item(r, "rent").comparison().exempt().stream().map(u -> u.className()).toList());
+        assertEquals(Status.MISSING, item(r, "rentAnnotated").status());
     }
 
     @Test

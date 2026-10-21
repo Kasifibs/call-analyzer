@@ -53,7 +53,7 @@ public final class AcquireReport {
         }
         out.println("Acquire edilenler    : " + simpleNames(c.acquired()));
         out.println("Akista kullanilanlar : " + simpleNames(Stream.of(c.covered(), c.missing(), c.possiblyMissing(),
-                c.undecided()).flatMap(List::stream).map(ClassUsage::className).sorted().toList()));
+                c.undecided(), c.exempt()).flatMap(List::stream).map(ClassUsage::className).sorted().toList()));
 
         section(out, "[X] EKSIK - akista kesin olarak bu sinifa cagri var ama acquire edilmemis (listede/anotasyonda yok):", c.missing(), true);
         section(out, "? OLASI EKSIK - yalnizca arayuz uzerinden (or. ICar) cagriliyor olabilir, acquire edilmemis:",
@@ -63,6 +63,8 @@ public final class AcquireReport {
                     + c.unresolved().stream().map(AcquiredCar::origin).collect(Collectors.joining(", "))
                     + "); bu siniflar o eleman olabilir:", c.undecided(), true);
         }
+        section(out, "- ISTISNA - acquire edilmeden kullanilmasina ayarla izin verilmis, eksik sayilmadi:", c.exempt(),
+                true);
         if (!c.unused().isEmpty()) {
             out.println();
             out.println("! ACQUIRE EDILIP AKISTA KULLANILMAYAN: " + simpleNames(c.unused()));
@@ -136,6 +138,7 @@ public final class AcquireReport {
         m.put("missing", usages(c.missing()));
         m.put("possiblyMissing", usages(c.possiblyMissing()));
         m.put("undecided", usages(c.undecided()));
+        m.put("exempt", usages(c.exempt()));
         m.put("unused", dotted(c.unused()));
         return m;
     }

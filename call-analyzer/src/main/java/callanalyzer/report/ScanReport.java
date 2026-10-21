@@ -33,16 +33,17 @@ public final class ScanReport {
             return;
         }
         out.println();
-        out.println(String.format("%4s  %-6s %-22s %-22s %-18s %s", "#", "Durum", "Kesin eksik",
-                "Olasi eksik/belirsiz", "Kullanilmayan", "Metot"));
+        out.println(String.format("%4s  %-6s %-22s %-22s %-18s %-14s %s", "#", "Durum", "Kesin eksik",
+                "Olasi eksik/belirsiz", "Kullanilmayan", "Istisna", "Metot"));
         for (ScanItem item : scan.items()) {
             AcquireComparison c = item.comparison();
             String possible = c == null ? "-" : join(names(c.possiblyMissing()),
                     c.undecided().isEmpty() ? "-" : String.join(",", simple(c.undecided())) + "(?)");
-            out.println(String.format("%4d  %-6s %-22s %-22s %-18s %s%s", item.index(), label(item.status()),
-                    c == null ? "-" : names(c.missing()), possible,
+            out.println(String.format("%4d  %-6s %-22s %-22s %-18s %-14s %s%s", item.index(),
+                    label(item.status()), c == null ? "-" : names(c.missing()), possible,
                     c == null || c.unused().isEmpty() ? "-" : String.join(",", c.unused().stream()
                             .map(MethodRef::simpleName).toList()),
+                    c == null ? "-" : names(c.exempt()),
                     item.candidate().method().toQualifiedString(), source(item)));
         }
         for (ScanItem item : scan.items()) {
@@ -97,6 +98,7 @@ public final class ScanReport {
                 m.put("missing", simple(c.missing()));
                 m.put("possiblyMissing", simple(c.possiblyMissing()));
                 m.put("undecided", simple(c.undecided()));
+                m.put("exempt", simple(c.exempt()));
                 m.put("unused", c.unused().stream().map(MethodRef::simpleName).toList());
                 if (pages == null) {
                     m.put("acquire", AcquireReport.toJson(c));

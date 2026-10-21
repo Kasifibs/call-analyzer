@@ -2,6 +2,7 @@ package callanalyzer.cli;
 
 import callanalyzer.acquire.AcquireAnalyzer;
 import callanalyzer.acquire.AcquireComparison;
+import callanalyzer.acquire.AcquireExemption;
 import callanalyzer.analysis.AnalysisOptions;
 import callanalyzer.analysis.AnalysisResult;
 import callanalyzer.analysis.CallGraphAnalyzer;
@@ -68,6 +69,12 @@ public final class Main {
               --acquire-annotation <tip> Or. com.example.AcquireCar : analiz edilen (giris) metotta bu anotasyon
                                          var mi bakar, icindeki siniflari (cars = {Opel.class, ...}) listeler ve
                                          karsilastirmaya ekler. --acquirer ile birlikte de kullanilabilir.
+              --exempt <metot>=<sinif>[,<sinif>...]
+                                         Istisna: bu metot verilen siniflari acquire etmeden kullanabilir; eksik
+                                         sayilmaz, raporda ISTISNA olarak gosterilir (--fail-on-missing'i da
+                                         tetiklemez). Or. com.example.RentalService#rent=com.example.TeslaRepo
+                                         Metot yerine yalnizca sinif adi verilirse siniftaki tum metotlar icin
+                                         gecerlidir. Tekrarlanabilir; ayar dosyasinda her istisna ayri satirda.
               --fail-on-missing          Karsilastirmada kesin eksik sinif bulunursa cikis kodu 3 olsun (CI icin).
               --tree                     Gezilen cagri agacini da yazdir.
 
@@ -124,6 +131,7 @@ public final class Main {
         String acquirer = null;
         String acquireAnnotation = null;
         boolean failOnMissing = false;
+        List<AcquireExemption> exemptions = new ArrayList<>();
         String eventClass = null;
         String eventDispatcher = null;
         String eventObserver = null;
@@ -160,6 +168,7 @@ public final class Main {
                     case "--tree" -> tree = true;
                     case "--acquirer" -> acquirer = value(args, ++i, a);
                     case "--acquire-annotation" -> acquireAnnotation = value(args, ++i, a);
+                    case "--exempt" -> exemptions.add(AcquireExemption.parse(value(args, ++i, a)));
                     case "--fail-on-missing" -> failOnMissing = true;
                     case "--event-class" -> eventClass = value(args, ++i, a);
                     case "--event-dispatcher" -> eventDispatcher = value(args, ++i, a);
@@ -222,13 +231,16 @@ public final class Main {
             }
             ClassHierarchy hierarchy = new ClassHierarchy(loader.classes());
             if (scan) {
-                return runScan(loader, hierarchy, options, acquirer, acquireAnnotation, format, output, openAfter,
-                        failOnMissing, stdout, stderr);
+                return runScan(loader, hierarchy, options, acquirer, acquireAnnotation, exemptions, format, output,
+                        openAfter, failOnMissing, stdout, stderr);
             }
             AnalysisResult result = new CallGraphAnalyzer(hierarchy, options, loader.classBytes()).analyze();
             AcquireComparison acquire = acquirer == null && acquireAnnotation == null
                     ? null
-                    : new AcquireAnalyzer(result, loader.classBytes(), acquirer, acquireAnnotation).analyze();
+                    : new AcquireAnalyzer(result, loader.classBytes(), acquirer, acquireAnnotation)
+                            .withExemptions(exemptions).analyze();
+            AcquireExemption.problems(hierarchy, exemptions, result.entries())
+                    .forEach(w -> stderr.println("UYARI: " + w));
 
             PrintWriter out = output == null
                     ? new PrintWriter(new OutputStreamWriter(stdout, StandardCharsets.UTF_8))
@@ -306,14 +318,18 @@ public final class Main {
      * start with {@code #}); backslashes are kept as they are, so Windows paths can be written directly.
      */
     private static int runScan(ClassPathLoader loader, ClassHierarchy hierarchy, AnalysisOptions options,
-                               String acquirer, String annotation, String format, Path output, boolean openAfter,
+                               String acquirer, String annotation, List<AcquireExemption> exemptions,
+                               String format, Path output, boolean openAfter,
                                boolean failOnMissing, PrintStream stdout, PrintStream stderr) throws IOException {
         if (format.equals("html") && output == null) {
             stderr.println("Hata: --scan --format html icin -o rapor.html gerekli (metot sayfalari yanindaki klasore yazilir).");
             return 2;
         }
-        AcquireScanner scanner = new AcquireScanner(hierarchy, loader.classBytes(), options, acquirer, annotation);
+        AcquireScanner scanner = new AcquireScanner(hierarchy, loader.classBytes(), options, acquirer, annotation)
+                .withExemptions(exemptions);
         List<Candidate> candidates = scanner.candidates();
+        AcquireExemption.problems(hierarchy, exemptions, candidates.stream().map(Candidate::method).toList())
+                .forEach(w -> stderr.println("UYARI: " + w));
         stderr.println(candidates.size() + " metot bulundu, analiz ediliyor...");
         HtmlScanReport html = format.equals("html") ? new HtmlScanReport(output) : null;
         ScanResult result = scanner.run(candidates, stderr::println, (item, analysis) -> {

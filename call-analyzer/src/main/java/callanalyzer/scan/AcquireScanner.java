@@ -2,6 +2,7 @@ package callanalyzer.scan;
 
 import callanalyzer.acquire.AcquireAnalyzer;
 import callanalyzer.acquire.AcquireComparison;
+import callanalyzer.acquire.AcquireExemption;
 import callanalyzer.analysis.AnalysisOptions;
 import callanalyzer.analysis.AnalysisResult;
 import callanalyzer.analysis.CallGraphAnalyzer;
@@ -36,6 +37,7 @@ public final class AcquireScanner {
     private final MethodSpec acquirerSpec;
     private final String acquirerClass;
     private final String annotationDesc;
+    private List<AcquireExemption> exemptions = List.of();
 
     /**
      * @param options    analysis options; their entries are ignored, the include/exclude filters also limit which
@@ -59,6 +61,12 @@ public final class AcquireScanner {
         }
         this.acquirerClass = acquirerSpec == null ? null : hierarchy.resolveClassName(acquirerSpec.className());
         this.annotationDesc = annotation == null ? null : "L" + hierarchy.resolveClassName(annotation) + ";";
+    }
+
+    /** Classes given methods may use without acquiring them; see {@link AcquireExemption}. */
+    public AcquireScanner withExemptions(List<AcquireExemption> exemptions) {
+        this.exemptions = List.copyOf(exemptions);
+        return this;
     }
 
     /** Methods calling the acquirer or carrying the annotation, sorted by class and method. */
@@ -137,7 +145,8 @@ public final class AcquireScanner {
                 String spec = m.ownerDotted() + "#" + m.name() + m.desc();
                 result = new CallGraphAnalyzer(hierarchy, options.withEntry(spec), classBytes)
                         .withEventRouter(router).analyze();
-                AcquireComparison cmp = new AcquireAnalyzer(result, repo, acquirer, annotation).analyze();
+                AcquireComparison cmp = new AcquireAnalyzer(result, repo, acquirer, annotation)
+                        .withExemptions(exemptions).analyze();
                 item = new ScanItem(i + 1, c, result.findings().size(), result.analysedMethods().size(), cmp, null);
             } catch (RuntimeException e) {
                 item = new ScanItem(i + 1, c, 0, 0, null, e.toString());

@@ -67,6 +67,13 @@ class MainTest {
         assertEquals(0, ok.exit(), ok.err());
         assertTrue(ok.out().contains("? OLASI EKSIK"));
 
+        Run exempt = run(concat(base, "sample.cars.RentalService#rent",
+                "--exempt", "sample.cars.RentalService#rent=sample.cars.TowTruck,sample.cars.Opel"));
+        assertEquals(0, exempt.exit(), exempt.err());
+        assertTrue(exempt.out().contains("- ISTISNA -"));
+        assertFalse(exempt.out().contains("[X] EKSIK"));
+        assertTrue(exempt.err().contains("UYARI: Istisnadaki sinif sinif yolunda yok: sample.cars.Opel"));
+
         Run json = run(concat(base, "sample.cars.RentalService#rent", "--format", "json"));
         assertTrue(json.out().contains("\"missing\": [\n"));
         assertTrue(json.out().contains("\"origin\": \"alan RentalService.bmw : Bmw\""));

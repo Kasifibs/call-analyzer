@@ -59,6 +59,7 @@ java -jar call-analyzer/target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--include-constructors` | `new Bmw()` gibi kurucu çağrılarını da raporla. |
 | `--acquirer <metot>` | Ör. `com.example.CarAcquirer#acquire`. Giriş metodunda bu metoda verilen listedeki `ICar` nesnelerini bulur ve akışta kullanılan sınıflarla karşılaştırır (bkz. aşağıda). |
 | `--acquire-annotation <tip>` | Ör. `com.example.AcquireCar`. Analiz edilen (giriş) metotta bu anotasyon var mı bakar, içinde verilen sınıfları listeler ve karşılaştırmaya ekler. `--acquirer` ile birlikte kullanılabilir. |
+| `--exempt <metot>=<sınıf>[,<sınıf>...]` | İstisna: bu metot verilen sınıfları acquire etmeden kullanabilir. Eksik sayılmaz, raporda **İSTİSNA** olarak gösterilir, `--fail-on-missing`'i tetiklemez. Metot yerine yalnızca sınıf adı verilirse sınıftaki tüm metotlar için geçerlidir; bir arayüz/üst sınıf verilirse tüm alt sınıfları kapsar. Tekrarlanabilir (ayar dosyasında her istisna ayrı `exempt=` satırı). |
 | `--fail-on-missing` | Karşılaştırmada kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
 | `--event-class`, `--event-dispatcher`, `--event-observer` | Event takibi (bkz. aşağıda). Üçü birlikte verilir. |
 | `--event-handle-method <ad>` | Observer'ın event'i alan metodu (varsayılan `handle`). |
@@ -534,6 +535,25 @@ varsa build'i başarısız yapar**.
   başarısız olsun isterseniz `<failOnPossiblyMissing>true</failOnPossiblyMissing>`.
 - **Atlamak için:** `mvn verify -Dcallanalyzer.skip=true`; uyarı verip build'i geçirmek için
   `-Dcallanalyzer.failOnMissing=false`.
+- **İstisna:** belirli bir metodun belirli sınıfları acquire etmeden kullanmasına izin vermek için:
+
+  ```xml
+  <exemptions>
+      <exemption>
+          <method>com.sirket.app.RentalService#rent</method>
+          <classes>
+              <class>com.sirket.domain.TeslaRepository</class>
+              <class>com.sirket.domain.OpelRepository</class>
+          </classes>
+      </exemption>
+      <!-- sinifin tum metotlari icin: <method>com.sirket.app.BatchJob</method> -->
+  </exemptions>
+  ```
+
+  Bu sınıflar o metotta eksik sayılmaz (build'i patlatmaz), logda `[istisna]` satırıyla ve raporda **İstisna**
+  bölümünde gösterilir. `<method>` için `--entry` ile aynı biçimler geçerlidir (`Sinif#metot`,
+  `Sinif#metot(ICar, int)`, yalnızca `Sinif`). Bir arayüz ya da üst sınıf verilirse tüm alt sınıfları kapsar.
+  İstisna hiçbir metotla eşleşmezse ya da sınıf sınıf yolunda yoksa (yazım hatası) uyarı verilir.
 
 Tüm ayarlar:
 
@@ -549,6 +569,7 @@ Tüm ayarlar:
 | `maxDepth`, `directOnly`, `onlyInterfaceMethods`, `skipInternal`, `includeConstructors` | | Komut satırındaki karşılıklarıyla aynı. |
 | `failOnMissing` | `true` | Kesin eksikte build'i başarısız yap (`-Dcallanalyzer.failOnMissing`). |
 | `failOnPossiblyMissing` | `false` | Olası eksikte de başarısız yap. |
+| `exemptions` | - | Metot bazında istisnalar (yukarıya bakın). |
 | `includeDependencies` | `true` | Bağımlılıkları sınıf yoluna ekle. `false` ile yalnızca projenin kendi jar'ı okunur (çok daha hızlı), ama akışın başka modüllere geçen kısımları takip edilmez. |
 | `warnMissingClasses` | `true` | Akış, `includes` paketlerinde olup sınıf yolunda bulunmayan bir sınıfa geçince uyar. `includeDependencies=false` iken metot başına değil tek satırlık özet olarak yazılır; `false` ile yalnızca `mvn -X` çıktısında görünür (`-Dcallanalyzer.warnMissingClasses`). |
 | `analyzedFile` | proje jar'ı | Başka bir jar/dizini analiz etmek için. |
