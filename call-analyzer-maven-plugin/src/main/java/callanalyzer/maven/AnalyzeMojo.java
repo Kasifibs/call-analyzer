@@ -17,6 +17,7 @@ import callanalyzer.scan.Candidate;
 import callanalyzer.scan.ScanItem;
 import callanalyzer.scan.ScanItem.Status;
 import callanalyzer.scan.ScanResult;
+import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.DependencyResolutionRequiredException;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -34,10 +35,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -147,8 +152,16 @@ public class AnalyzeMojo extends AbstractMojo {
     private boolean includeDependencies;
 
     /**
-     * Warn when a flow calls a class of the {@link #includes} packages that is not on the class path. With
-     * {@link #includeDependencies} off this is summarised in one line; {@code false} logs it only at debug level.
+     * Put only these dependencies on the class path: {@code groupId:artifactId} patterns where {@code *} matches any
+     * text ({@code com.example:domain}, {@code com.example:*}); a pattern without {@code :} is a groupId. When given,
+     * {@link #includeDependencies} is ignored.
+     */
+    @Parameter
+    private List<String> dependencyIncludes;
+
+    /**
+     * Warn when a flow calls a class of the {@link #includes} packages that is not on the class path. When not all
+     * dependencies are on the class path this is summarised in one line; {@code false} logs it only at debug level.
      */
     @Parameter(property = "callanalyzer.warnMissingClasses", defaultValue = "true")
     private boolean warnMissingClasses;
@@ -219,22 +232,33 @@ public class AnalyzeMojo extends AbstractMojo {
     private ScanResult scan(Path main) throws IOException, MojoExecutionException {
         Set<String> ownClasses = ClassPathLoader.load(List.of(main)).classes().keySet();
 
+        List<Path> dependencies = new ArrayList<>();
+        try {
+            for (String element : project.getRuntimeClasspathElements()) {
+                Path p = Path.of(element);
+                if (!p.equals(outputDirectory.toPath()) && !p.equals(main) && Files.exists(p)) {
+                    dependencies.add(p);
+                }
+            }
+        } catch (DependencyResolutionRequiredException e) {
+            throw new MojoExecutionException("call-analyzer: bagimliliklar cozulemedi", e);
+        }
         List<Path> classPath = new ArrayList<>();
         classPath.add(main);
-        if (includeDependencies) {
-            try {
-                for (String element : project.getRuntimeClasspathElements()) {
-                    Path p = Path.of(element);
-                    if (!p.equals(outputDirectory.toPath()) && !p.equals(main) && Files.exists(p)) {
-                        classPath.add(p);
-                    }
-                }
-            } catch (DependencyResolutionRequiredException e) {
-                throw new MojoExecutionException("call-analyzer: bagimliliklar cozulemedi", e);
+        if (selectsDependencies()) {
+            List<Path> selected = selectedDependencies(dependencies);
+            classPath.addAll(selected);
+            getLog().info("call-analyzer: " + main.getFileName() + " analiz ediliyor (" + selected.size() + "/"
+                    + dependencies.size() + " bagimlilik sinif yolunda" + (selected.isEmpty() ? "" : ": "
+                    + selected.stream().map(p -> p.getFileName().toString()).collect(Collectors.joining(", ")))
+                    + ")");
+        } else {
+            if (includeDependencies) {
+                classPath.addAll(dependencies);
             }
+            getLog().info("call-analyzer: " + main.getFileName() + " analiz ediliyor (" + (classPath.size() - 1)
+                    + " bagimlilik sinif yolunda)");
         }
-        getLog().info("call-analyzer: " + main.getFileName() + " analiz ediliyor (" + (classPath.size() - 1)
-                + " bagimlilik sinif yolunda)");
         ClassPathLoader loader = ClassPathLoader.load(classPath);
         loader.warnings().forEach(w -> getLog().debug(w));
         ClassHierarchy hierarchy = new ClassHierarchy(loader.classes());
@@ -270,7 +294,8 @@ public class AnalyzeMojo extends AbstractMojo {
         HtmlScanReport html = htmlReport ? new HtmlScanReport(reportDirectory.toPath().resolve("tarama.html")) : null;
         // Without dependencies every flow into another module reaches a missing class, so one summary line is
         // enough; the per-method details stay available with mvn -X.
-        boolean warnEach = warnMissingClasses && includeDependencies;
+        boolean allDependencies = includeDependencies && !selectsDependencies();
+        boolean warnEach = warnMissingClasses && allDependencies;
         Set<MethodRef> leavingClassPath = new HashSet<>();
         ScanResult result = scanner.run(candidates, getLog()::debug, (item, analysis) -> {
             if (html != null) {
@@ -286,9 +311,10 @@ public class AnalyzeMojo extends AbstractMojo {
                 leavingClassPath.add(item.candidate().method());
             });
         });
-        if (warnMissingClasses && !includeDependencies && !leavingClassPath.isEmpty()) {
+        if (warnMissingClasses && !allDependencies && !leavingClassPath.isEmpty()) {
             getLog().warn("call-analyzer: " + leavingClassPath.size() + " metotta akis sinif yolunda olmayan"
-                    + " siniflara geciyor (includeDependencies=false), iclerine girilmedi. Ayrintilar icin mvn -X;"
+                    + " siniflara geciyor (" + (selectsDependencies() ? "dependencyIncludes ile secilmeyen"
+                    : "includeDependencies=false") + "), iclerine girilmedi. Ayrintilar icin mvn -X;"
                     + " bu uyariyi kapatmak icin <warnMissingClasses>false</warnMissingClasses>.");
         }
         if (html != null) {
@@ -371,6 +397,54 @@ public class AnalyzeMojo extends AbstractMojo {
                 .map(e -> (e.car().isResolved() ? MethodRef.simpleName(e.car().concreteClass()) : "?")
                         + " (satir " + e.acquireLine() + ")")
                 .distinct().collect(Collectors.joining(", "));
+    }
+
+    private boolean selectsDependencies() {
+        return dependencyIncludes != null && !dependencyIncludes.isEmpty();
+    }
+
+    /** The class path entries of the dependencies matching {@link #dependencyIncludes}, in class path order. */
+    private List<Path> selectedDependencies(List<Path> dependencies) {
+        Map<Path, String> coordinates = new HashMap<>();
+        for (Artifact a : project.getArtifacts()) {
+            if (a.getFile() != null) {
+                coordinates.put(a.getFile().toPath(), a.getGroupId() + ":" + a.getArtifactId());
+            }
+        }
+        List<Pattern> patterns = dependencyIncludes.stream().map(AnalyzeMojo::dependencyPattern).toList();
+        boolean[] used = new boolean[patterns.size()];
+        List<Path> selected = new ArrayList<>();
+        for (Path p : dependencies) {
+            String gav = coordinates.get(p);
+            if (gav == null) {
+                continue;
+            }
+            for (int i = 0; i < patterns.size(); i++) {
+                if (patterns.get(i).matcher(gav).matches()) {
+                    used[i] = true;
+                    if (!selected.contains(p)) {
+                        selected.add(p);
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < used.length; i++) {
+            if (!used[i]) {
+                getLog().warn("call-analyzer: <dependencyInclude>" + dependencyIncludes.get(i)
+                        + "</dependencyInclude> hicbir bagimlilikla eslesmedi (groupId:artifactId bekleniyor).");
+            }
+        }
+        return selected;
+    }
+
+    /** {@code groupId:artifactId} with {@code *} wildcards; a pattern without {@code :} is a groupId. */
+    static Pattern dependencyPattern(String text) {
+        String t = text.strip();
+        if (!t.contains(":")) {
+            t = t + ":*";
+        }
+        return Pattern.compile(Arrays.stream(t.split("\\*", -1)).map(Pattern::quote)
+                .collect(Collectors.joining(".*")));
     }
 
     private List<AcquireExemption> acquireExemptions() throws MojoExecutionException {
