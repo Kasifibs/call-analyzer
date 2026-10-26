@@ -79,7 +79,8 @@ class MainTest {
                 "--fail-on-unreleased", "--entry"};
         Run unreleased = run(concat(lock, "sample.cars.LockingService#teslaNotReleased"));
         assertEquals(3, unreleased.exit(), unreleased.err());
-        assertTrue(unreleased.out().contains("[R] RELEASE EDILMEMIS:\n  Tesla"), unreleased.out());
+        assertTrue(unreleased.out().lines().dropWhile(l -> !l.equals("[R] RELEASE EDILMEMIS:")).skip(1)
+                .findFirst().orElse("").startsWith("  Tesla "), unreleased.out());
         assertEquals(0, run(concat(lock, "sample.cars.LockingService#releasedInFinally")).exit());
         Run lockJson = run(concat(lock, "sample.cars.LockingService#teslaNotReleased", "--format", "json"));
         assertTrue(lockJson.out().contains("\"status\": \"UNRELEASED\""), lockJson.out());
