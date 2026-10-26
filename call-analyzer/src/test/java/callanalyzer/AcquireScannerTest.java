@@ -93,6 +93,18 @@ class AcquireScannerTest {
     }
 
     @Test
+    void unreleasedAcquiresHaveTheirOwnStatus() {
+        AcquireScanner scanner = scanner(new AnalysisOptions().target("sample.cars.ICar")
+                .include("sample.cars.LockingService")).withReleaser("sample.cars.CarAcquirer#release");
+        ScanResult r = scanner.run(scanner.candidates(), s -> { }, (i, a) -> { });
+        assertEquals(Status.UNRELEASED, item(r, "neverReleased").status());
+        assertEquals(Status.UNRELEASED, item(r, "teslaNotReleased").status());
+        assertEquals(Status.POSSIBLE, item(r, "releasedOutsideFinally").status());
+        assertEquals(Status.OK, item(r, "releasedInFinally").status());
+        assertEquals(Status.OK, item(r, "annotatedOnly").status());
+    }
+
+    @Test
     void includeFilterLimitsTheScan() {
         assertTrue(scanner(new AnalysisOptions().target("sample.cars.ICar").include("sample.events"))
                 .candidates().isEmpty());

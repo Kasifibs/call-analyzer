@@ -1,7 +1,10 @@
 package callanalyzer.maven;
 
+import callanalyzer.acquire.AcquireComparison;
 import callanalyzer.acquire.AcquireExemption;
+import callanalyzer.acquire.AcquireRelease;
 import callanalyzer.acquire.ClassUsage;
+import callanalyzer.acquire.ReleaseCheck;
 import callanalyzer.analysis.AnalysisOptions;
 import callanalyzer.analysis.ClassHierarchy;
 import callanalyzer.events.EventConfig;
@@ -34,6 +37,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -112,6 +116,18 @@ public class AnalyzeMojo extends AbstractMojo {
     private String eventDetection;
 
     /**
+     * Release method, e.g. {@code com.example.LockAcquirer#release}: every element a method acquires with the
+     * {@link #acquirer} must be released with it in a {@code finally} block of the same method. Acquire annotations
+     * are not checked.
+     */
+    @Parameter(property = "callanalyzer.releaser")
+    private String releaser;
+
+    /** Fail the build if an acquired element is not released (see {@link #releaser}). */
+    @Parameter(property = "callanalyzer.failOnUnreleased", defaultValue = "true")
+    private boolean failOnUnreleased;
+
+    /**
      * Classes a method may use without acquiring them: they are reported as exempt and never fail the build. A class
      * also exempts its subclasses (an interface all its implementations). See {@link Exemption}.
      */
@@ -163,6 +179,9 @@ public class AnalyzeMojo extends AbstractMojo {
         }
         if (acquirer == null && acquireAnnotation == null) {
             throw new MojoExecutionException("call-analyzer: <acquirer> ve/veya <acquireAnnotation> verilmeli.");
+        }
+        if (releaser != null && acquirer == null) {
+            throw new MojoExecutionException("call-analyzer: <releaser> icin <acquirer> da verilmeli.");
         }
         if (targets == null || targets.isEmpty()) {
             throw new MojoExecutionException("call-analyzer: en az bir <target> verilmeli (or. com.example.ICar).");
@@ -234,7 +253,7 @@ public class AnalyzeMojo extends AbstractMojo {
 
         List<AcquireExemption> exempt = acquireExemptions();
         AcquireScanner scanner = new AcquireScanner(hierarchy, loader.classBytes(), options, acquirer,
-                acquireAnnotation).withExemptions(exempt);
+                acquireAnnotation).withExemptions(exempt).withReleaser(releaser);
         // Only this project's own methods are scanned; dependencies are analysed where the flow leads into them.
         List<Candidate> candidates = scanner.candidates().stream()
                 .filter(c -> ownClasses.contains(c.method().owner()))
@@ -287,38 +306,71 @@ public class AnalyzeMojo extends AbstractMojo {
     }
 
     private void report(ScanResult result) throws MojoFailureException {
-        long missing = result.count(Status.MISSING);
-        long possible = result.count(Status.POSSIBLE);
+        long missing = count(result, c -> !c.missing().isEmpty());
+        long possible = count(result, c -> !c.possiblyMissing().isEmpty() || !c.undecided().isEmpty());
+        long unreleased = count(result, c -> c.release() != null && !c.release().unreleased().isEmpty());
         getLog().info("call-analyzer: " + result.items().size() + " metot: " + missing + " kesin eksik, " + possible
-                + " olasi eksik, " + result.count(Status.OK) + " OK" + (result.count(Status.ERROR) > 0
+                + " olasi eksik, " + (releaser == null ? "" : unreleased + " release eksik, ")
+                + result.count(Status.OK) + " OK" + (result.count(Status.ERROR) > 0
                 ? ", " + result.count(Status.ERROR) + " hata" : ""));
         for (ScanItem item : result.items()) {
-            if (item.comparison() != null && !item.comparison().exempt().isEmpty()) {
-                getLog().info("  [istisna] " + item.candidate().method().toQualifiedString()
-                        + "  acquire edilmeden izin verilen: " + names(item.comparison().exempt()));
+            String method = item.candidate().method().toQualifiedString();
+            AcquireComparison c = item.comparison();
+            if (c == null) {
+                getLog().warn("  [HATA] " + method + ": " + item.error());
+                continue;
             }
-            switch (item.status()) {
-                case MISSING -> getLog().error("  [X] " + item.candidate().method().toQualifiedString()
-                        + "  kesin eksik: " + names(item.comparison().missing()));
-                case POSSIBLE -> getLog().warn("  [?] " + item.candidate().method().toQualifiedString()
-                        + "  olasi eksik/belirsiz: " + names(item.comparison().possiblyMissing())
-                        + (item.comparison().undecided().isEmpty() ? "" : " " + names(item.comparison().undecided())));
-                case ERROR -> getLog().warn("  [HATA] " + item.candidate().method().toQualifiedString() + ": "
-                        + item.error());
-                default -> {
+            if (!c.exempt().isEmpty()) {
+                getLog().info("  [istisna] " + method + "  acquire edilmeden izin verilen: " + names(c.exempt()));
+            }
+            if (!c.missing().isEmpty()) {
+                getLog().error("  [X] " + method + "  kesin eksik: " + names(c.missing()));
+            }
+            if (!c.possiblyMissing().isEmpty() || !c.undecided().isEmpty()) {
+                getLog().warn("  [?] " + method + "  olasi eksik/belirsiz: " + names(c.possiblyMissing())
+                        + (c.undecided().isEmpty() ? "" : " " + names(c.undecided())));
+            }
+            ReleaseCheck r = c.release();
+            if (r != null) {
+                if (!r.unreleased().isEmpty()) {
+                    getLog().error("  [R] " + method + "  release edilmeyen: " + elements(r.unreleased()));
+                }
+                if (!r.notInFinally().isEmpty()) {
+                    getLog().warn("  [R?] " + method + "  finally disinda release edilen: "
+                            + elements(r.notInFinally()));
+                }
+                if (!r.undecided().isEmpty()) {
+                    getLog().warn("  [R?] " + method + "  release'i belirlenemeyen: " + elements(r.undecided()));
                 }
             }
         }
         Path index = reportDirectory.toPath().resolve(htmlReport ? "tarama.html" : "tarama.txt");
         getLog().info("call-analyzer raporu: " + index);
+        List<String> failures = new ArrayList<>();
         if (failOnMissing && missing > 0) {
-            throw new MojoFailureException("call-analyzer: " + missing + " metotta acquire edilmeden kullanilan sinif"
-                    + " var (kesin eksik). Ayrintilar: " + index);
+            failures.add(missing + " metotta acquire edilmeden kullanilan sinif var (kesin eksik)");
         }
         if (failOnPossiblyMissing && possible > 0) {
-            throw new MojoFailureException("call-analyzer: " + possible + " metotta olasi eksik acquire var."
-                    + " Ayrintilar: " + index);
+            failures.add(possible + " metotta olasi eksik acquire var");
         }
+        if (failOnUnreleased && unreleased > 0) {
+            failures.add(unreleased + " metotta acquire edilip release edilmeyen var");
+        }
+        if (!failures.isEmpty()) {
+            throw new MojoFailureException("call-analyzer: " + String.join("; ", failures) + ". Ayrintilar: "
+                    + index);
+        }
+    }
+
+    private static long count(ScanResult result, Predicate<AcquireComparison> condition) {
+        return result.items().stream().filter(i -> i.comparison() != null && condition.test(i.comparison())).count();
+    }
+
+    private static String elements(List<AcquireRelease> elements) {
+        return elements.stream()
+                .map(e -> (e.car().isResolved() ? MethodRef.simpleName(e.car().concreteClass()) : "?")
+                        + " (satir " + e.acquireLine() + ")")
+                .distinct().collect(Collectors.joining(", "));
     }
 
     private List<AcquireExemption> acquireExemptions() throws MojoExecutionException {

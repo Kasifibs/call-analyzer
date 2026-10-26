@@ -59,6 +59,8 @@ java -jar call-analyzer/target/call-analyzer-1.0.0-SNAPSHOT-all.jar \
 | `--include-constructors` | `new Bmw()` gibi kurucu çağrılarını da raporla. |
 | `--acquirer <metot>` | Ör. `com.example.CarAcquirer#acquire`. Giriş metodunda bu metoda verilen listedeki `ICar` nesnelerini bulur ve akışta kullanılan sınıflarla karşılaştırır (bkz. aşağıda). |
 | `--acquire-annotation <tip>` | Ör. `com.example.AcquireCar`. Analiz edilen (giriş) metotta bu anotasyon var mı bakar, içinde verilen sınıfları listeler ve karşılaştırmaya ekler. `--acquirer` ile birlikte kullanılabilir. |
+| `--releaser <metot>` | Ör. `com.example.LockAcquirer#release`. Giriş metodunun kendi `--acquirer` çağrılarıyla aldığı her elemanın aynı metotta `finally` içinde bu metotla bırakıldığını kontrol eder (bkz. aşağıda). |
+| `--fail-on-unreleased` | Release edilmeyen eleman varsa çıkış kodu `3` olur. |
 | `--exempt <metot>=<sınıf>[,<sınıf>...]` | İstisna: bu metot verilen sınıfları acquire etmeden kullanabilir. Eksik sayılmaz, raporda **İSTİSNA** olarak gösterilir, `--fail-on-missing`'i tetiklemez. Metot yerine yalnızca sınıf adı verilirse sınıftaki tüm metotlar için geçerlidir; bir arayüz/üst sınıf verilirse tüm alt sınıfları kapsar. Tekrarlanabilir (ayar dosyasında her istisna ayrı `exempt=` satırı). |
 | `--fail-on-missing` | Karşılaştırmada kesin eksik sınıf bulunursa çıkış kodu `3` olur (CI'da kontrol için). |
 | `--event-class`, `--event-dispatcher`, `--event-observer` | Event takibi (bkz. aşağıda). Üçü birlikte verilir. |
@@ -251,6 +253,40 @@ Notlar:
 - Yalnızca giriş metodunun (`--entry`) kendi anotasyonuna bakılır; sınıf üzerindeki ya da akışta daha derindeki
   metotlardaki anotasyonlar dikkate alınmaz.
 - Anotasyonda `ICar`'ı uygulamayan bir sınıf verilmişse yanında `(hedef tipi uygulamiyor!)` yazar.
+
+## Release kontrolü (`--releaser`)
+
+`--acquirer` ile alınan her eleman (ör. repo kilidi) yine aynı metotta, bir `finally` bloğunda release metoduyla
+bırakılmalıdır:
+
+```java
+LockAcquirer.acquire(List.of(aRepo, bRepo));
+try {
+    ...
+} finally {
+    LockAcquirer.release(List.of(aRepo, bRepo));
+}
+```
+
+```bash
+java -jar call-analyzer.jar --cp uygulama.jar --target com.example.IRepository --scan \
+     --acquirer com.example.LockAcquirer#acquire --releaser com.example.LockAcquirer#release --fail-on-unreleased
+```
+
+- Yalnızca giriş metodunun **kendi** acquire çağrılarına bakılır (metot gövdesi ve içindeki lambda'lar).
+  Anotasyonla alınanlar kontrol edilmez, onları anotasyonun kendisi bırakır.
+- Release listesi de acquire listesi gibi çözülür (`List.of(...)`, alanlar, yerel değişkenler, aynı liste
+  değişkeni...) ve eleman bazında eşleştirilir.
+- Sonuçlar:
+  - **[R] Release edilmemiş:** metotta bu elemanı bırakan release çağrısı yok. Başka bir metotta (yardımcı metot,
+    çağıran) yapılan release sayılmaz. `--fail-on-unreleased` ile çıkış kodu `3` olur; plugin'de build
+    başarısız olur.
+  - **! finally dışında release:** acquire'dan sonra release var ama `finally` içinde değil, yani exception olursa
+    lock bırakılmaz. Uyarı olarak gösterilir, build'i patlatmaz.
+  - **~ Belirsiz:** release listesinde sınıfı belirlenemeyen bir eleman var, bu eleman o olabilir.
+  - **[OK]:** `finally` içinde release edilmiş.
+- Release metodunun kendi içinde elemanlarla yaptığı çağrılar (ör. `repo.unlock()`) kullanım sayılmaz.
+- Toplu taramada release eksiği olan metotların durumu **Release eksik** (`[R]`) olur.
 
 ## Toplu tarama (`--scan`)
 
@@ -501,6 +537,8 @@ varsa build'i başarısız yapar**.
         </targets>
         <acquirer>com.sirket.domain.CarAcquirer#acquire</acquirer>
         <acquireAnnotation>com.sirket.domain.AcquireCar</acquireAnnotation>
+        <!-- release kontrolu (istege bagli) -->
+        <releaser>com.sirket.domain.CarAcquirer#release</releaser>
         <includes>
             <include>com.sirket</include>
         </includes>
@@ -531,7 +569,8 @@ varsa build'i başarısız yapar**.
   eden metotlar yalnızca **projenin kendi sınıflarında** aranır.
 - **Raporlar:** `target/call-analyzer/` altında `tarama.html` (+ `tarama_metotlar/` içinde metot başına sayfa),
   `tarama.txt`, `tarama.json`.
-- **Build ne zaman başarısız olur:** kesin eksik varsa (`failOnMissing`, varsayılan `true`). Olası eksikler için de
+- **Build ne zaman başarısız olur:** kesin eksik varsa (`failOnMissing`, varsayılan `true`) ve `releaser`
+  verildiyse release edilmeyen eleman varsa (`failOnUnreleased`, varsayılan `true`). Olası eksikler için de
   başarısız olsun isterseniz `<failOnPossiblyMissing>true</failOnPossiblyMissing>`.
 - **Atlamak için:** `mvn verify -Dcallanalyzer.skip=true`; uyarı verip build'i geçirmek için
   `-Dcallanalyzer.failOnMissing=false`.
@@ -570,6 +609,8 @@ Tüm ayarlar:
 | `failOnMissing` | `true` | Kesin eksikte build'i başarısız yap (`-Dcallanalyzer.failOnMissing`). |
 | `failOnPossiblyMissing` | `false` | Olası eksikte de başarısız yap. |
 | `exemptions` | - | Metot bazında istisnalar (yukarıya bakın). |
+| `releaser` | - | Release metodu, ör. `com.sirket.lock.LockAcquirer#release` (`-Dcallanalyzer.releaser`). Verilirse `acquirer` ile alınan her elemanın aynı metotta `finally` içinde release edildiği kontrol edilir (bkz. *Release kontrolü*). |
+| `failOnUnreleased` | `true` | Release edilmeyen eleman varsa build'i başarısız yap (`-Dcallanalyzer.failOnUnreleased`). `finally` dışındaki release'ler yalnızca uyarıdır. |
 | `includeDependencies` | `true` | Bağımlılıkları sınıf yoluna ekle. `false` ile yalnızca projenin kendi jar'ı okunur (çok daha hızlı), ama akışın başka modüllere geçen kısımları takip edilmez. |
 | `warnMissingClasses` | `true` | Akış, `includes` paketlerinde olup sınıf yolunda bulunmayan bir sınıfa geçince uyar. `includeDependencies=false` iken metot başına değil tek satırlık özet olarak yazılır; `false` ile yalnızca `mvn -X` çıktısında görünür (`-Dcallanalyzer.warnMissingClasses`). |
 | `analyzedFile` | proje jar'ı | Başka bir jar/dizini analiz etmek için. |

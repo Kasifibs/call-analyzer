@@ -69,6 +69,10 @@ public final class Main {
               --acquire-annotation <tip> Or. com.example.AcquireCar : analiz edilen (giris) metotta bu anotasyon
                                          var mi bakar, icindeki siniflari (cars = {Opel.class, ...}) listeler ve
                                          karsilastirmaya ekler. --acquirer ile birlikte de kullanilabilir.
+              --releaser <metot>         Or. com.example.CarAcquirer#release : giris metodunun kendi --acquirer
+                                         cagrilarinda acquire edilen her elemanin AYNI metotta finally icinde bu
+                                         metotla release edildigini kontrol eder (anotasyonla alinanlara bakmaz).
+              --fail-on-unreleased       Release edilmeyen eleman varsa cikis kodu 3 olsun.
               --exempt <metot>=<sinif>[,<sinif>...]
                                          Istisna: bu metot verilen siniflari acquire etmeden kullanabilir; eksik
                                          sayilmaz, raporda ISTISNA olarak gosterilir (--fail-on-missing'i da
@@ -132,6 +136,8 @@ public final class Main {
         String acquireAnnotation = null;
         boolean failOnMissing = false;
         List<AcquireExemption> exemptions = new ArrayList<>();
+        String releaser = null;
+        boolean failOnUnreleased = false;
         String eventClass = null;
         String eventDispatcher = null;
         String eventObserver = null;
@@ -168,6 +174,8 @@ public final class Main {
                     case "--tree" -> tree = true;
                     case "--acquirer" -> acquirer = value(args, ++i, a);
                     case "--acquire-annotation" -> acquireAnnotation = value(args, ++i, a);
+                    case "--releaser" -> releaser = value(args, ++i, a);
+                    case "--fail-on-unreleased" -> failOnUnreleased = true;
                     case "--exempt" -> exemptions.add(AcquireExemption.parse(value(args, ++i, a)));
                     case "--fail-on-missing" -> failOnMissing = true;
                     case "--event-class" -> eventClass = value(args, ++i, a);
@@ -212,6 +220,9 @@ public final class Main {
                 options.events(new EventConfig(eventClass, eventDispatcher, eventObserver, eventHandle, eventExact,
                         eventDetection));
             }
+            if (releaser != null && acquirer == null) {
+                throw new IllegalArgumentException("--releaser icin --acquirer de verilmeli.");
+            }
             if (!format.equals("text") && !format.equals("json") && !format.equals("html")) {
                 throw new IllegalArgumentException("Gecersiz --format: " + format);
             }
@@ -231,14 +242,14 @@ public final class Main {
             }
             ClassHierarchy hierarchy = new ClassHierarchy(loader.classes());
             if (scan) {
-                return runScan(loader, hierarchy, options, acquirer, acquireAnnotation, exemptions, format, output,
-                        openAfter, failOnMissing, stdout, stderr);
+                return runScan(loader, hierarchy, options, acquirer, acquireAnnotation, exemptions, releaser, format,
+                        output, openAfter, failOnMissing, failOnUnreleased, stdout, stderr);
             }
             AnalysisResult result = new CallGraphAnalyzer(hierarchy, options, loader.classBytes()).analyze();
             AcquireComparison acquire = acquirer == null && acquireAnnotation == null
                     ? null
                     : new AcquireAnalyzer(result, loader.classBytes(), acquirer, acquireAnnotation)
-                            .withExemptions(exemptions).analyze();
+                            .withExemptions(exemptions).withReleaser(releaser).analyze();
             AcquireExemption.problems(hierarchy, exemptions, result.entries())
                     .forEach(w -> stderr.println("UYARI: " + w));
 
@@ -275,6 +286,10 @@ public final class Main {
                 stderr.println("UYARI: --open icin -o ile bir dosya verilmeli.");
             }
             if (failOnMissing && acquire != null && !acquire.missing().isEmpty()) {
+                return 3;
+            }
+            if (failOnUnreleased && acquire != null && acquire.release() != null
+                    && !acquire.release().unreleased().isEmpty()) {
                 return 3;
             }
             return 0;
@@ -319,14 +334,15 @@ public final class Main {
      */
     private static int runScan(ClassPathLoader loader, ClassHierarchy hierarchy, AnalysisOptions options,
                                String acquirer, String annotation, List<AcquireExemption> exemptions,
-                               String format, Path output, boolean openAfter,
-                               boolean failOnMissing, PrintStream stdout, PrintStream stderr) throws IOException {
+                               String releaser, String format, Path output, boolean openAfter,
+                               boolean failOnMissing, boolean failOnUnreleased, PrintStream stdout,
+                               PrintStream stderr) throws IOException {
         if (format.equals("html") && output == null) {
             stderr.println("Hata: --scan --format html icin -o rapor.html gerekli (metot sayfalari yanindaki klasore yazilir).");
             return 2;
         }
         AcquireScanner scanner = new AcquireScanner(hierarchy, loader.classBytes(), options, acquirer, annotation)
-                .withExemptions(exemptions);
+                .withExemptions(exemptions).withReleaser(releaser);
         List<Candidate> candidates = scanner.candidates();
         AcquireExemption.problems(hierarchy, exemptions, candidates.stream().map(Candidate::method).toList())
                 .forEach(w -> stderr.println("UYARI: " + w));
@@ -361,7 +377,9 @@ public final class Main {
         if (openAfter && output != null) {
             openInDesktop(output, stderr);
         }
-        return failOnMissing && result.count(ScanItem.Status.MISSING) > 0 ? 3 : 0;
+        boolean unreleased = result.items().stream().anyMatch(i -> i.comparison() != null
+                && i.comparison().release() != null && !i.comparison().release().unreleased().isEmpty());
+        return failOnMissing && result.count(ScanItem.Status.MISSING) > 0 || failOnUnreleased && unreleased ? 3 : 0;
     }
 
     private static void openInDesktop(Path file, PrintStream stderr) {

@@ -8,6 +8,7 @@ import callanalyzer.analysis.ClassHierarchy.DispatchTarget;
 import callanalyzer.analysis.Finding;
 import callanalyzer.analysis.MethodSpec;
 import callanalyzer.dataflow.BytecodeRepository;
+import callanalyzer.dataflow.FinallyBlocks;
 import callanalyzer.dataflow.MethodDataFlow;
 import callanalyzer.dataflow.TrackedValue;
 import callanalyzer.dataflow.ValueResolver;
@@ -54,6 +55,8 @@ public final class AcquireAnalyzer {
     private final String annotationType;
 
     private List<AcquireExemption> exemptions = List.of();
+    private MethodSpec releaserSpec;
+    private String releaserClass;
     private ValueResolver resolver;
 
     public AcquireAnalyzer(AnalysisResult result, Map<String, byte[]> classBytes, String acquirerSpec) {
@@ -98,6 +101,27 @@ public final class AcquireAnalyzer {
         return this;
     }
 
+    /**
+     * Also checks that every acquire call of the entry method is released in a {@code finally} block of the same
+     * method by calling {@code releaserSpec} (e.g. {@code com.example.CarAcquirer#release}) with the same elements.
+     */
+    public AcquireAnalyzer withReleaser(String releaserSpec) {
+        if (releaserSpec == null) {
+            this.releaserSpec = null;
+            this.releaserClass = null;
+            return this;
+        }
+        if (acquirerSpec == null) {
+            throw new IllegalArgumentException("Release kontrolu icin acquire metodu (--acquirer) da verilmeli.");
+        }
+        this.releaserSpec = MethodSpec.parse(releaserSpec);
+        if (this.releaserSpec.methodName() == null) {
+            throw new IllegalArgumentException("--releaser bir metot belirtmeli, or. com.example.LockAcquirer#release");
+        }
+        this.releaserClass = hierarchy.resolveClassName(this.releaserSpec.className());
+        return this;
+    }
+
     public AcquireComparison analyze() {
         Set<MethodRef> acquirerMethods = new HashSet<>();
         List<AcquireCall> calls = new ArrayList<>();
@@ -106,6 +130,10 @@ public final class AcquireAnalyzer {
             for (CallEdge edge : e.getValue()) {
                 if (isAcquirerCall(edge.site(), edge.targets())) {
                     callsAcquirer = true;
+                    acquirerMethods.add(edge.site().target());
+                    edge.targets().forEach(t -> acquirerMethods.add(t.method()));
+                } else if (isReleaserCall(edge.site(), edge.targets())) {
+                    // what the releaser does with the elements is no usage either
                     acquirerMethods.add(edge.site().target());
                     edge.targets().forEach(t -> acquirerMethods.add(t.method()));
                 }
@@ -135,14 +163,16 @@ public final class AcquireAnalyzer {
                 unresolved.add(car);
             }
         }
-        return compare(calls, otherCalls, annotations, acquired, unresolved, acquirerMethods);
+        return compare(calls, otherCalls, annotations, acquired, unresolved, acquirerMethods,
+                releaserSpec == null ? null : releaseCheck(calls));
     }
 
     // ------------------------------------------------------------------------------------------------ comparison
 
     private AcquireComparison compare(List<AcquireCall> calls, List<AcquireCall> otherCalls,
                                       List<AnnotationCheck> annotations, Set<String> acquired,
-                                      List<AcquiredCar> unresolved, Set<MethodRef> acquirerMethods) {
+                                      List<AcquiredCar> unresolved, Set<MethodRef> acquirerMethods,
+                                      ReleaseCheck release) {
         Map<String, List<Finding>> certain = new TreeMap<>();
         Map<String, List<Finding>> possible = new TreeMap<>();
         for (Finding f : result.findings()) {
@@ -180,7 +210,7 @@ public final class AcquireAnalyzer {
                 .toList();
         return new AcquireComparison(acquirerSpec == null ? null : acquirerSpec.text(), annotationType,
                 List.copyOf(calls), List.copyOf(otherCalls), List.copyOf(annotations), List.copyOf(acquired),
-                List.copyOf(unresolved), covered, missing, possiblyMissing, undecided, exempt, unused);
+                List.copyOf(unresolved), covered, missing, possiblyMissing, undecided, exempt, unused, release);
     }
 
     /**
@@ -211,6 +241,10 @@ public final class AcquireAnalyzer {
     }
 
     // ----------------------------------------------------------------------------------------- finding acquirers
+
+    private boolean isReleaserCall(CallSite site, List<DispatchTarget> targets) {
+        return releaserSpec != null && isAcquirerCall(hierarchy, releaserSpec, releaserClass, site, targets);
+    }
 
     private boolean isAcquirerCall(CallSite site, List<DispatchTarget> targets) {
         return acquirerSpec != null && isAcquirerCall(hierarchy, acquirerSpec, acquirerClass, site, targets);
@@ -253,24 +287,124 @@ public final class AcquireAnalyzer {
             if (!(insn instanceof MethodInsnNode m)) {
                 continue;
             }
-            MethodRef called = new MethodRef(m.owner, m.name, m.desc);
-            CallSite site = new CallSite(BytecodeRepository.kindOf(m), called, -1, false);
+            CallSite site = siteOf(m);
             if (!isAcquirerCall(site, hierarchy.dispatch(site))) {
                 continue;
             }
-            Set<AcquiredCar> cars = new LinkedHashSet<>();
-            for (TrackedValue arg : flow.arguments(m)) {
-                Set<AcquiredCar> found = resolveCars(flow, arg);
-                if (found.isEmpty() && arg.sources().stream().anyMatch(src -> src instanceof ValueSource.Parameter)) {
-                    // acquire(cars) where the list is a parameter nobody in the flow passes: contents unknown
-                    found = Set.of(new AcquiredCar(null, result.targets().get(0), flow.method().toShortString()
-                            + " metoduna disaridan gelen liste (icerigi bilinmiyor)"));
-                }
-                cars.addAll(found);
-            }
-            calls.add(new AcquireCall(flow.method(), flow.sourceFile(), flow.lineOf(insn), called, List.copyOf(cars)));
+            calls.add(new AcquireCall(flow.method(), flow.sourceFile(), flow.lineOf(insn), site.target(),
+                    List.copyOf(carsPassedTo(flow, m))));
         }
         return calls;
+    }
+
+    private static CallSite siteOf(MethodInsnNode m) {
+        return new CallSite(BytecodeRepository.kindOf(m), new MethodRef(m.owner, m.name, m.desc), -1, false);
+    }
+
+    /** Target type elements of the lists (or single values) passed to {@code call}. */
+    private Set<AcquiredCar> carsPassedTo(MethodDataFlow flow, MethodInsnNode call) {
+        Set<AcquiredCar> cars = new LinkedHashSet<>();
+        for (TrackedValue arg : flow.arguments(call)) {
+            Set<AcquiredCar> found = resolveCars(flow, arg);
+            if (found.isEmpty() && arg.sources().stream().anyMatch(src -> src instanceof ValueSource.Parameter)) {
+                // acquire(cars) where the list is a parameter nobody in the flow passes: contents unknown
+                found = Set.of(new AcquiredCar(null, result.targets().get(0), flow.method().toShortString()
+                        + " metoduna disaridan gelen liste (icerigi bilinmiyor)"));
+            }
+            cars.addAll(found);
+        }
+        return cars;
+    }
+
+    // ------------------------------------------------------------------------------------------------- release
+
+    /**
+     * For every element of every acquire call: is it released after the acquire, in a finally block, by a release
+     * call of the same method? Release calls elsewhere (a helper method, a caller) do not count.
+     */
+    private ReleaseCheck releaseCheck(List<AcquireCall> calls) {
+        List<ReleaseCall> releaseCalls = new ArrayList<>();
+        List<AcquireRelease> elements = new ArrayList<>();
+        Set<MethodRef> callers = new LinkedHashSet<>();
+        calls.forEach(c -> callers.add(c.caller()));
+        for (MethodRef caller : callers) {
+            MethodDataFlow flow = repo.flow(caller).orElse(null);
+            if (flow == null) {
+                continue;
+            }
+            List<MethodInsnNode> acquires = new ArrayList<>();
+            Map<MethodInsnNode, Set<AcquiredCar>> releases = new java.util.LinkedHashMap<>();
+            for (AbstractInsnNode insn : flow.instructions()) {
+                if (insn instanceof MethodInsnNode m) {
+                    CallSite site = siteOf(m);
+                    if (isAcquirerCall(site, hierarchy.dispatch(site))) {
+                        acquires.add(m);
+                    } else if (isReleaserCall(site, hierarchy.dispatch(site))) {
+                        releases.put(m, carsPassedTo(flow, m));
+                    }
+                }
+            }
+            // javac copies finally blocks, so one source line can hold several release instructions
+            Set<AbstractInsnNode> allFinally = acquires.isEmpty() ? Set.of()
+                    : FinallyBlocks.protecting(flow, flow.instructions().getFirst());
+            Map<Integer, ReleaseCall> byLine = new TreeMap<>();
+            releases.forEach((m, cars) -> byLine.merge(flow.lineOf(m),
+                    new ReleaseCall(caller, flow.sourceFile(), flow.lineOf(m), allFinally.contains(m), List.copyOf(cars)),
+                    (a, b) -> a.inFinally() ? a : b));
+            releaseCalls.addAll(byLine.values());
+
+            Set<String> seen = new HashSet<>();
+            for (MethodInsnNode acquire : acquires) {
+                int line = flow.lineOf(acquire);
+                Set<AbstractInsnNode> protecting = FinallyBlocks.protecting(flow, acquire);
+                int at = flow.indexOf(acquire);
+                for (AcquiredCar car : carsPassedTo(flow, acquire)) {
+                    if (!seen.add(line + " " + car)) {
+                        continue; // the same acquire copied into several paths
+                    }
+                    AcquireRelease.Status status = AcquireRelease.Status.UNRELEASED;
+                    MethodInsnNode by = null;
+                    for (Map.Entry<MethodInsnNode, Set<AcquiredCar>> r : releases.entrySet()) {
+                        AcquireRelease.Status s;
+                        if (r.getValue().stream().anyMatch(rc -> releases(rc, car))) {
+                            s = protecting.contains(r.getKey()) ? AcquireRelease.Status.RELEASED
+                                    : flow.indexOf(r.getKey()) > at ? AcquireRelease.Status.NOT_IN_FINALLY : null;
+                        } else if (r.getValue().stream().anyMatch(rc -> mayRelease(rc, car))
+                                && (protecting.contains(r.getKey()) || flow.indexOf(r.getKey()) > at)) {
+                            s = AcquireRelease.Status.UNDECIDED;
+                        } else {
+                            s = null;
+                        }
+                        if (s != null && s.compareTo(status) < 0) {
+                            status = s;
+                            by = r.getKey();
+                        }
+                    }
+                    ReleaseCall release = by == null ? null : byLine.get(flow.lineOf(by));
+                    elements.add(new AcquireRelease(caller, flow.sourceFile(), line, car, status, release));
+                }
+            }
+        }
+        return new ReleaseCheck(releaserSpec.text(), List.copyOf(releaseCalls), List.copyOf(elements));
+    }
+
+    /** Whether releasing {@code released} certainly releases the acquired element. */
+    private boolean releases(AcquiredCar released, AcquiredCar acquired) {
+        if (acquired.isResolved() && released.isResolved()) {
+            return hierarchy.isSubtypeOf(acquired.concreteClass(), released.concreteClass());
+        }
+        // same unknown value, e.g. acquire(cars) ... release(cars) with cars a parameter
+        return !acquired.isResolved() && released.equals(acquired);
+    }
+
+    /** Whether one of the two is unknown and could be the other. */
+    private boolean mayRelease(AcquiredCar released, AcquiredCar acquired) {
+        if (!released.isResolved()) {
+            return hierarchy.isSubtypeOf(acquired.isResolved() ? acquired.concreteClass() : acquired.declaredType(),
+                    released.declaredType())
+                    || hierarchy.isSubtypeOf(released.declaredType(), acquired.declaredType());
+        }
+        return !acquired.isResolved() && hierarchy.isSubtypeOf(released.concreteClass(), acquired.declaredType());
     }
 
     // --------------------------------------------------------------------------------------------- annotation

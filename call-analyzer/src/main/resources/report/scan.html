@@ -28,7 +28,7 @@ function h(tag, props, ...kids) {
   return e;
 }
 const badge = (text, cls) => h("span", {class: "badge " + (cls || "")}, text);
-const STATUS = {MISSING: ["Eksik var", "hit"], POSSIBLE: ["Olası eksik", "warn"], OK: ["OK", "ok"], ERROR: ["Hata", "hit"]};
+const STATUS = {MISSING: ["Eksik var", "hit"], UNRELEASED: ["Release eksik", "hit"], POSSIBLE: ["Olası eksik", "warn"], OK: ["OK", "ok"], ERROR: ["Hata", "hit"]};
 
 document.getElementById("sub").append([D.acquirer, D.annotation ? "@" + D.annotation : null].filter(Boolean).join(", "),
     "  ·  ", D.generated);
@@ -37,6 +37,7 @@ const count = s => D.methods.filter(m => m.status === s).length;
 main.append(h("div", {class: "cards"},
     card(D.methods.length, "Taranan metot"),
     card(count("MISSING"), "Kesin eksiği olan", count("MISSING") ? "bad" : "good"),
+    count("UNRELEASED") ? card(count("UNRELEASED"), "Release eksiği olan", "bad") : null,
     card(count("POSSIBLE"), "Yalnızca olası eksik", count("POSSIBLE") ? "warn" : ""),
     card(count("OK"), "Sorunsuz", "good"),
     count("ERROR") ? card(count("ERROR"), "Hata", "bad") : null));
@@ -56,7 +57,7 @@ main.append(filters);
 
 const table = h("table", null, h("tr", null, h("th", null, "#"), h("th", null, "Durum"), h("th", null, "Metot"),
     h("th", null, "Acquire edilen"), h("th", null, "Kesin eksik"), h("th", null, "Olası eksik / belirsiz"),
-    h("th", null, "Kullanılmayan"), h("th", null, "İstisna"), h("th", null, "Bulgu")));
+    h("th", null, "Kullanılmayan"), h("th", null, "İstisna"), h("th", null, "Release edilmeyen"), h("th", null, "Bulgu")));
 const rows = D.methods.map(m => {
   const st = STATUS[m.status];
   const src = [m.callsAcquirer ? badge("acquire()", "acc") : null, m.annotated ? badge("@" + (D.annotationShort || "anotasyon"), "acc") : null];
@@ -70,6 +71,7 @@ const rows = D.methods.map(m => {
       h("td", null, (m.possiblyMissing || []).map(c => badge(c, "warn")), (m.undecided || []).map(c => badge(c + " ?"))),
       h("td", null, (m.unused || []).map(c => badge(c, "warn"))),
       h("td", null, (m.exempt || []).map(c => badge(c))),
+      h("td", null, (m.unreleased || []).map(c => badge(c, "hit")), (m.releaseWarnings || []).map(c => badge(c + " !", "warn"))),
       h("td", {class: "num"}, m.findings));
   table.append(row);
   return {row, m, text: (m.method + " " + (m.missing || []).join(" ") + " " + (m.acquired || []).join(" ")).toLowerCase()};

@@ -111,6 +111,10 @@ function renderSummary(sec) {
   if (A) {
     cards.append(card(A.missing.length, "Kesin eksik", A.missing.length ? "bad" : "good"));
     cards.append(card(A.possiblyMissing.length, "Olası eksik", A.possiblyMissing.length ? "warn" : ""));
+    if (A.release) {
+      const n = A.release.items.filter(i => i.st === "UNRELEASED").length;
+      cards.append(card(n, "Release edilmeyen", n ? "bad" : "good"));
+    }
   }
   if (D.meta.events) {
     const pub = publishedEvents();
@@ -413,10 +417,30 @@ function renderAcquire(sec) {
   if (A.unused.length) sec.append(h("div", {class: "panel cat warn"}, h("h2", null, "Acquire edilip akışta kullanılmayan"),
       A.unused.map(c => badge(c, "warn"))));
   category(sec, "ok", "Acquire edilmiş ve kullanılıyor", A.covered);
+  if (A.release) renderRelease(sec, A.release);
   if (A.other.length) {
     const p = h("div", {class: "panel cat"}, h("h2", null, "Bilgi: akıştaki diğer acquire çağrıları (karşılaştırmaya dahil değil)"));
     for (const c of A.other) p.append(h("div", null, h("span", {class: "mono"}, c.m), h("span", {class: "muted"}, "  " + loc(c.f, c.l))), carList(c.cars));
     sec.append(p);
+  }
+}
+function renderRelease(sec, R) {
+  const kinds = [["UNRELEASED", "bad", "Release edilmemiş"],
+    ["NOT_IN_FINALLY", "warn", "finally dışında release edilmiş (exception olursa release edilmez)"],
+    ["UNDECIDED", "info", "Belirsiz — release listesinde sınıfı belirlenemeyen eleman var"],
+    ["RELEASED", "ok", "finally içinde release edilmiş"]];
+  const p = h("div", {class: "panel"}, h("h2", null, "Release kontrolü (" + R.releaser + ")"),
+      h("p", {class: "muted"}, "Giriş metodunda acquire edilen her eleman aynı metotta finally içinde release edilmeli."));
+  if (!R.items.length) p.append(h("p", {class: "muted"}, "Giriş metodunda acquire çağrısı yok."));
+  sec.append(p);
+  for (const [st, cls, title] of kinds) {
+    const items = R.items.filter(i => i.st === st);
+    if (!items.length) continue;
+    sec.append(h("div", {class: "panel cat " + cls}, h("h2", null, title + " (" + items.length + ")"),
+        h("ul", null, items.map(i => h("li", null, i.cls ? h("b", null, i.cls) : badge("?", "warn"),
+            h("span", {class: "muted"}, "  acquire: "), h("span", {class: "mono"}, i.m),
+            h("span", {class: "muted"}, "  " + loc(i.f, i.l) + (i.rl != null ? "  ·  release: satır " + i.rl : "")
+                + (i.cls ? "" : "  ← " + i.origin)))))));
   }
 }
 function carList(cars) {

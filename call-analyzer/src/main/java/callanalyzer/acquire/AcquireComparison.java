@@ -20,10 +20,12 @@ import java.util.List;
  * @param exempt          classes not in the list that the entry method may use without acquiring them (configured
  *                        {@link AcquireExemption}s); never counted as missing
  * @param unused          acquired classes that are not used in the flow
+ * @param release         whether the entry method's acquire calls are released; {@code null} if no release method
+ *                        is configured
  */
 public record AcquireComparison(String acquirer, String annotation, List<AcquireCall> calls,
                                 List<AcquireCall> otherCalls, List<AnnotationCheck> annotations, List<String> acquired,
                                 List<AcquiredCar> unresolved, List<ClassUsage> covered, List<ClassUsage> missing,
                                 List<ClassUsage> possiblyMissing, List<ClassUsage> undecided, List<ClassUsage> exempt,
-                                List<String> unused) {
+                                List<String> unused, ReleaseCheck release) {
 }

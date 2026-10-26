@@ -74,6 +74,19 @@ class MainTest {
         assertFalse(exempt.out().contains("[X] EKSIK"));
         assertTrue(exempt.err().contains("UYARI: Istisnadaki sinif sinif yolunda yok: sample.cars.Opel"));
 
+        String[] lock = {"--cp", Fixtures.sampleClassesDir().toString(), "--target", "sample.cars.ICar",
+                "--acquirer", "sample.cars.CarAcquirer#acquire", "--releaser", "sample.cars.CarAcquirer#release",
+                "--fail-on-unreleased", "--entry"};
+        Run unreleased = run(concat(lock, "sample.cars.LockingService#teslaNotReleased"));
+        assertEquals(3, unreleased.exit(), unreleased.err());
+        assertTrue(unreleased.out().contains("[R] RELEASE EDILMEMIS:\n  Tesla"), unreleased.out());
+        assertEquals(0, run(concat(lock, "sample.cars.LockingService#releasedInFinally")).exit());
+        Run lockJson = run(concat(lock, "sample.cars.LockingService#teslaNotReleased", "--format", "json"));
+        assertTrue(lockJson.out().contains("\"status\": \"UNRELEASED\""), lockJson.out());
+        assertEquals(2, run("--cp", Fixtures.sampleClassesDir().toString(), "--target", "sample.cars.ICar",
+                "--releaser", "sample.cars.CarAcquirer#release", "--entry", "sample.cars.LockingService").exit(),
+                "--releaser needs --acquirer");
+
         Run json = run(concat(base, "sample.cars.RentalService#rent", "--format", "json"));
         assertTrue(json.out().contains("\"missing\": [\n"));
         assertTrue(json.out().contains("\"origin\": \"alan RentalService.bmw : Bmw\""));

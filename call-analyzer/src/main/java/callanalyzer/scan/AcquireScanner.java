@@ -38,6 +38,7 @@ public final class AcquireScanner {
     private final String acquirerClass;
     private final String annotationDesc;
     private List<AcquireExemption> exemptions = List.of();
+    private String releaser;
 
     /**
      * @param options    analysis options; their entries are ignored, the include/exclude filters also limit which
@@ -66,6 +67,12 @@ public final class AcquireScanner {
     /** Classes given methods may use without acquiring them; see {@link AcquireExemption}. */
     public AcquireScanner withExemptions(List<AcquireExemption> exemptions) {
         this.exemptions = List.copyOf(exemptions);
+        return this;
+    }
+
+    /** Release method to check the acquire calls against; see {@link AcquireAnalyzer#withReleaser}. */
+    public AcquireScanner withReleaser(String releaser) {
+        this.releaser = releaser;
         return this;
     }
 
@@ -146,7 +153,7 @@ public final class AcquireScanner {
                 result = new CallGraphAnalyzer(hierarchy, options.withEntry(spec), classBytes)
                         .withEventRouter(router).analyze();
                 AcquireComparison cmp = new AcquireAnalyzer(result, repo, acquirer, annotation)
-                        .withExemptions(exemptions).analyze();
+                        .withExemptions(exemptions).withReleaser(releaser).analyze();
                 item = new ScanItem(i + 1, c, result.findings().size(), result.analysedMethods().size(), cmp, null);
             } catch (RuntimeException e) {
                 item = new ScanItem(i + 1, c, 0, 0, null, e.toString());

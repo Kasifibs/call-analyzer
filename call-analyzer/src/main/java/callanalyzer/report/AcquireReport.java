@@ -2,9 +2,11 @@ package callanalyzer.report;
 
 import callanalyzer.acquire.AcquireCall;
 import callanalyzer.acquire.AcquireComparison;
+import callanalyzer.acquire.AcquireRelease;
 import callanalyzer.acquire.AcquiredCar;
 import callanalyzer.acquire.AnnotationCheck;
 import callanalyzer.acquire.ClassUsage;
+import callanalyzer.acquire.ReleaseCheck;
 import callanalyzer.analysis.Finding;
 import callanalyzer.model.MethodRef;
 
@@ -81,7 +83,38 @@ public final class AcquireReport {
                 writeCars(out, call.cars());
             }
         }
+        if (c.release() != null) {
+            writeRelease(c.release(), out);
+        }
         out.flush();
+    }
+
+    private static void writeRelease(ReleaseCheck r, PrintWriter out) {
+        out.println();
+        out.println("RELEASE KONTROLU (" + r.releaser() + "): giris metodunda acquire edilen her eleman ayni metotta"
+                + " finally icinde release edilmeli");
+        if (r.elements().isEmpty()) {
+            out.println("  (giris metodunda acquire cagrisi yok, kontrol edilecek bir sey yok)");
+            return;
+        }
+        releaseGroup(out, "[R] RELEASE EDILMEMIS:", r.unreleased());
+        releaseGroup(out, "! FINALLY DISINDA RELEASE EDILMIS (exception olursa release edilmez):", r.notInFinally());
+        releaseGroup(out, "~ BELIRSIZ - release listesinde sinifi belirlenemeyen eleman var:", r.undecided());
+        releaseGroup(out, "[OK] finally icinde release edilmis:", r.released());
+    }
+
+    private static void releaseGroup(PrintWriter out, String title, List<AcquireRelease> elements) {
+        if (elements.isEmpty()) {
+            return;
+        }
+        out.println(title);
+        for (AcquireRelease e : elements) {
+            String name = e.car().isResolved() ? MethodRef.simpleName(e.car().concreteClass()) : "?";
+            out.println("  " + pad(name, 14) + " acquire: " + e.caller().toShortString() + " "
+                    + TextReport.location(e.sourceFile(), e.acquireLine())
+                    + (e.release() == null ? "" : "  release: satir " + e.release().line())
+                    + (e.car().isResolved() ? "" : "  (" + e.car().origin() + ")"));
+        }
     }
 
     private static void writeCars(PrintWriter out, List<AcquiredCar> cars) {
@@ -140,6 +173,31 @@ public final class AcquireReport {
         m.put("undecided", usages(c.undecided()));
         m.put("exempt", usages(c.exempt()));
         m.put("unused", dotted(c.unused()));
+        if (c.release() != null) {
+            Map<String, Object> rm = new LinkedHashMap<>();
+            rm.put("releaser", c.release().releaser());
+            rm.put("calls", c.release().calls().stream().map(call -> {
+                Map<String, Object> cm = new LinkedHashMap<>();
+                cm.put("caller", call.caller().toQualifiedString());
+                cm.put("sourceFile", call.sourceFile());
+                cm.put("line", call.line());
+                cm.put("inFinally", call.inFinally());
+                cm.put("cars", cars(call.cars()));
+                return (Object) cm;
+            }).toList());
+            rm.put("elements", c.release().elements().stream().map(e -> {
+                Map<String, Object> em = new LinkedHashMap<>();
+                em.put("status", e.status().name());
+                em.put("class", e.car().isResolved() ? MethodRef.toDottedName(e.car().concreteClass()) : null);
+                em.put("origin", e.car().origin());
+                em.put("caller", e.caller().toQualifiedString());
+                em.put("sourceFile", e.sourceFile());
+                em.put("acquireLine", e.acquireLine());
+                em.put("releaseLine", e.release() == null ? null : e.release().line());
+                return (Object) em;
+            }).toList());
+            m.put("release", rm);
+        }
         return m;
     }
 

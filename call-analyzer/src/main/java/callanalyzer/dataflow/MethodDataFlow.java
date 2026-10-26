@@ -9,6 +9,7 @@ import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.analysis.Analyzer;
 import org.objectweb.asm.tree.analysis.AnalyzerException;
 import org.objectweb.asm.tree.analysis.Frame;
@@ -56,6 +57,10 @@ public final class MethodDataFlow {
 
     public InsnList instructions() {
         return node.instructions;
+    }
+
+    public List<TryCatchBlockNode> tryCatchBlocks() {
+        return node.tryCatchBlocks;
     }
 
     public AbstractInsnNode insn(int index) {

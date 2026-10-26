@@ -1,6 +1,7 @@
 package callanalyzer.report;
 
 import callanalyzer.acquire.AcquireComparison;
+import callanalyzer.acquire.AcquireRelease;
 import callanalyzer.acquire.ClassUsage;
 import callanalyzer.model.MethodRef;
 import callanalyzer.scan.ScanItem;
@@ -11,6 +12,7 @@ import java.io.PrintWriter;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /** Text and JSON output of an acquire scan ({@code --scan}). */
 public final class ScanReport {
@@ -25,6 +27,7 @@ public final class ScanReport {
         out.println("Taranan metot : " + scan.items().size() + "  (acquire cagrisi: " + calls
                 + (scan.annotation() == null ? "" : ", @" + MethodRef.simpleName(scan.annotation()) + ": " + annotated) + ")");
         out.println("Sonuc         : " + scan.count(Status.MISSING) + " metotta kesin eksik, "
+                + (scan.count(Status.UNRELEASED) > 0 ? scan.count(Status.UNRELEASED) + " metotta release eksik, " : "")
                 + scan.count(Status.POSSIBLE) + " metotta yalnizca olasi eksik, " + scan.count(Status.OK) + " metot OK"
                 + (scan.count(Status.ERROR) > 0 ? ", " + scan.count(Status.ERROR) + " hata" : ""));
         if (scan.items().isEmpty()) {
@@ -99,6 +102,11 @@ public final class ScanReport {
                 m.put("possiblyMissing", simple(c.possiblyMissing()));
                 m.put("undecided", simple(c.undecided()));
                 m.put("exempt", simple(c.exempt()));
+                if (c.release() != null) {
+                    m.put("unreleased", released(c.release().unreleased()));
+                    m.put("releaseWarnings", released(Stream.concat(c.release().notInFinally().stream(),
+                            c.release().undecided().stream()).toList()));
+                }
                 m.put("unused", c.unused().stream().map(MethodRef::simpleName).toList());
                 if (pages == null) {
                     m.put("acquire", AcquireReport.toJson(c));
@@ -116,6 +124,11 @@ public final class ScanReport {
         return usages.stream().map(u -> MethodRef.simpleName(u.className())).toList();
     }
 
+    private static List<String> released(List<AcquireRelease> elements) {
+        return elements.stream().map(e -> e.car().isResolved() ? MethodRef.simpleName(e.car().concreteClass()) : "?")
+                .distinct().toList();
+    }
+
     private static String names(List<ClassUsage> usages) {
         return usages.isEmpty() ? "-" : String.join(",", simple(usages));
     }
@@ -127,6 +140,7 @@ public final class ScanReport {
     private static String label(Status s) {
         return switch (s) {
             case MISSING -> "[X]";
+            case UNRELEASED -> "[R]";
             case POSSIBLE -> "[?]";
             case OK -> "[OK]";
             case ERROR -> "[HATA]";

@@ -1,6 +1,7 @@
 package callanalyzer.scan;
 
 import callanalyzer.acquire.AcquireComparison;
+import callanalyzer.acquire.ReleaseCheck;
 
 /**
  * Outcome of analysing one candidate. The full call graph is not kept (it can be large); it is handed to the
@@ -19,7 +20,9 @@ public record ScanItem(int index, Candidate candidate, int findings, int analyse
     public enum Status {
         /** A class used with certainty is not acquired. */
         MISSING,
-        /** Only possibly missing or undecided classes. */
+        /** An acquired element is not released (in a finally block of the same method). */
+        UNRELEASED,
+        /** Only possibly missing or undecided classes, or releases that are not in a finally block / undecided. */
         POSSIBLE,
         OK,
         ERROR
@@ -32,7 +35,12 @@ public record ScanItem(int index, Candidate candidate, int findings, int analyse
         if (!comparison.missing().isEmpty()) {
             return Status.MISSING;
         }
-        if (!comparison.possiblyMissing().isEmpty() || !comparison.undecided().isEmpty()) {
+        ReleaseCheck release = comparison.release();
+        if (release != null && !release.unreleased().isEmpty()) {
+            return Status.UNRELEASED;
+        }
+        if (!comparison.possiblyMissing().isEmpty() || !comparison.undecided().isEmpty()
+                || release != null && (!release.notInFinally().isEmpty() || !release.undecided().isEmpty())) {
             return Status.POSSIBLE;
         }
         return Status.OK;

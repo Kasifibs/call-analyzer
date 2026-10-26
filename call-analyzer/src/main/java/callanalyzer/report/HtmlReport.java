@@ -249,6 +249,22 @@ public final class HtmlReport {
         m.put("exempt", usages(c.exempt()));
         m.put("covered", usages(c.covered()));
         m.put("unused", c.unused().stream().map(MethodRef::simpleName).toList());
+        if (c.release() != null) {
+            Map<String, Object> rm = new LinkedHashMap<>();
+            rm.put("releaser", c.release().releaser());
+            rm.put("items", c.release().elements().stream().map(e -> {
+                Map<String, Object> em = new LinkedHashMap<>();
+                em.put("st", e.status().name());
+                em.put("cls", e.car().isResolved() ? MethodRef.simpleName(e.car().concreteClass()) : null);
+                em.put("origin", e.car().origin());
+                em.put("m", e.caller().toShortString());
+                em.put("f", e.sourceFile());
+                em.put("l", e.acquireLine());
+                em.put("rl", e.release() == null ? null : e.release().line());
+                return (Object) em;
+            }).toList());
+            m.put("release", rm);
+        }
         return m;
     }
 

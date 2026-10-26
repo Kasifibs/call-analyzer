@@ -3,6 +3,8 @@ package callanalyzer;
 import callanalyzer.acquire.AcquireAnalyzer;
 import callanalyzer.acquire.AcquireComparison;
 import callanalyzer.acquire.AcquireExemption;
+import callanalyzer.acquire.AcquireRelease;
+import callanalyzer.acquire.ReleaseCheck;
 import callanalyzer.acquire.AcquiredCar;
 import callanalyzer.acquire.AnnotationCheck;
 import callanalyzer.acquire.ClassUsage;
@@ -12,6 +14,7 @@ import callanalyzer.analysis.MethodSpec;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import static callanalyzer.Fixtures.analyze;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -80,6 +83,59 @@ class AcquireAnalyzerTest {
                 .analyze();
         assertTrue(wholeClass.possiblyMissing().isEmpty());
         assertEquals(List.of("Tesla", "TowTruck"), names(wholeClass.exempt()));
+    }
+
+    private static AcquireComparison withRelease(String entry) {
+        AnalysisResult result = analyze(new AnalysisOptions().entry(entry).target("sample.cars.ICar"));
+        return new AcquireAnalyzer(result, Fixtures.classBytes(), "sample.cars.CarAcquirer#acquire",
+                "sample.cars.AcquireCar").withReleaser("sample.cars.CarAcquirer#release").analyze();
+    }
+
+    /** "Class:STATUS" for every acquired element. */
+    private static List<String> releaseStates(String method) {
+        ReleaseCheck r = withRelease("sample.cars.LockingService#" + method).release();
+        return r.elements().stream().map(e -> (e.car().isResolved()
+                ? e.car().concreteClass().substring("sample/cars/".length()) : "?") + ":" + e.status()).toList();
+    }
+
+    @Test
+    void acquiredElementsMustBeReleasedInAFinallyBlockOfTheSameMethod() {
+        assertEquals(List.of("Bmw:RELEASED", "Tesla:RELEASED"), releaseStates("releasedInFinally"));
+        assertEquals(List.of("Tesla:RELEASED"), releaseStates("acquiredInsideTry"));
+        assertEquals(List.of("Bmw:RELEASED", "Tesla:UNRELEASED"), releaseStates("teslaNotReleased"));
+        assertEquals(List.of("Bmw:NOT_IN_FINALLY"), releaseStates("releasedOutsideFinally"));
+        assertEquals(List.of("Bmw:UNRELEASED"), releaseStates("neverReleased"));
+        // only releases in the acquiring method itself count
+        assertEquals(List.of("Bmw:UNRELEASED"), releaseStates("releasedInHelper"));
+        // the same unknown list is acquired and released
+        assertEquals(List.of("?:RELEASED"), releaseStates("sameListFromOutside"));
+        // the annotation needs no release
+        assertTrue(releaseStates("annotatedOnly").isEmpty());
+    }
+
+    @Test
+    void releaseCallsAreReportedOncePerLine() {
+        ReleaseCheck r = withRelease("sample.cars.LockingService#releasedInFinally").release();
+        assertEquals(1, r.calls().size());
+        assertTrue(r.calls().get(0).inFinally());
+        AcquireRelease bmw = r.released().get(0);
+        assertEquals(r.calls().get(0), bmw.release());
+        assertEquals(11, bmw.acquireLine());
+    }
+
+    @Test
+    void callsInsideTheReleaserAreNoUsage() {
+        // CarAcquirer.release calls car.brand() on every element: with the releaser configured that is no usage
+        assertFalse(usedInsideRelease(withRelease("sample.cars.LockingService#teslaNotReleased")));
+        AcquireComparison without = compare("sample.cars.LockingService#teslaNotReleased");
+        assertTrue(usedInsideRelease(without));
+        assertEquals(null, without.release());
+    }
+
+    private static boolean usedInsideRelease(AcquireComparison c) {
+        return Stream.of(c.covered(), c.missing(), c.possiblyMissing(), c.undecided()).flatMap(List::stream)
+                .flatMap(u -> Stream.concat(u.certain().stream(), u.possible().stream()))
+                .anyMatch(f -> f.caller().name().equals("release"));
     }
 
     @Test
