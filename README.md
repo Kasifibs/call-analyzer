@@ -511,7 +511,8 @@ Statik analiz olduğu için sonuçlar **ihtiyatlıdır** (fazlasını gösterebi
 
 ## Maven plugin'i
 
-Analizi projenizin build'inin bir parçası yapar: jar oluştuktan sonra (`verify` fazında) projenizdeki acquire eden
+Analizi projenizin build'inin bir parçası yapar: jar oluştuktan hemen sonra (varsayılan olarak `package` fazında;
+başka bir faz için `<execution>` içine ör. `<phase>verify</phase>` yazın) projenizdeki acquire eden
 **tüm metotları** bulur (`--scan` ile aynı), her birinin akışını analiz eder ve **kesin eksik acquire olan bir metot
 varsa build'i başarısız yapar**.
 
@@ -550,7 +551,7 @@ varsa build'i başarısız yapar**.
 </plugin>
 ```
 
-`mvn verify` (ya da `mvn install`) sırasında:
+`mvn package` (ya da `mvn verify` / `mvn install`) sırasında:
 
 ```
 [INFO] --- call-analyzer:1.0.0-SNAPSHOT:analyze (default) @ app ---
@@ -572,7 +573,7 @@ varsa build'i başarısız yapar**.
 - **Build ne zaman başarısız olur:** kesin eksik varsa (`failOnMissing`, varsayılan `true`) ve `releaser`
   verildiyse release edilmeyen eleman varsa (`failOnUnreleased`, varsayılan `true`). Olası eksikler için de
   başarısız olsun isterseniz `<failOnPossiblyMissing>true</failOnPossiblyMissing>`.
-- **Atlamak için:** `mvn verify -Dcallanalyzer.skip=true`; uyarı verip build'i geçirmek için
+- **Atlamak için:** `mvn package -Dcallanalyzer.skip=true`; uyarı verip build'i geçirmek için
   `-Dcallanalyzer.failOnMissing=false`.
 - **İstisna:** belirli bir metodun belirli sınıfları acquire etmeden kullanmasına izin vermek için:
 

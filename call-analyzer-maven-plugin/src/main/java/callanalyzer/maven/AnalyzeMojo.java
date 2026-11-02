@@ -53,7 +53,7 @@ import java.util.stream.Collectors;
  * <p>The project's runtime dependencies (including other modules of a multi-module build) are put on the class path,
  * so flows into them are followed; only the project's own classes are scanned for acquiring methods.
  */
-@Mojo(name = "analyze", defaultPhase = LifecyclePhase.VERIFY, threadSafe = true,
+@Mojo(name = "analyze", defaultPhase = LifecyclePhase.PACKAGE, threadSafe = true,
         requiresDependencyResolution = ResolutionScope.RUNTIME)
 public class AnalyzeMojo extends AbstractMojo {
 
